@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.0",
+  "batchId": "5b0c0d9e-5f3a-4a55-9d0e-3d6f6f7c1a10",
+  "agent": {
+    "agentId": "agent-checkout-api",
+    "agentVersion": "1.4.2",
+    "sentAt": "2026-10-12T09:15:02.118Z"
+  },
+  "events": [
+    {
+      "eventId": "0192a3b4-7c10-7d3e-8a1f-5a2b9c4d6e70",
+      "timestamp": "2026-10-12T09:15:00.000Z",
+      "intervalSeconds": 15,
+      "resource": {
+        "serviceName": "checkout-api",
+        "instanceId": "checkout-api-07",
+        "environment": "prod",
+        "region": "eu-south-1"
+      },
+      "metrics": {
+        "cpuUsagePercent": 62.4,
+        "memoryUsedBytes": 1288490188,
+        "memoryLimitBytes": 2147483648,
+        "networkRxBytesPerSec": 1843200.0,
+        "networkTxBytesPerSec": 2211840.0,
+        "diskReadBytesPerSec": 20480.0,
+        "diskWriteBytesPerSec": 143360.0,
+        "activeThreadCount": 118,
+        "httpRequestsPerSec": 342.5,
+        "httpErrorRatePercent": 0.4,
+        "httpLatencyP95Ms": 184.0,
+        "gcPauseMsPerMin": 96.0
+      }
+    }
+  ]
+}

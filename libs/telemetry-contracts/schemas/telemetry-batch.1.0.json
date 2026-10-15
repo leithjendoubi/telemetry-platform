@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.telemetry.local/schemas/telemetry-batch/1.0.json",
+  "title": "TelemetryBatch",
+  "description": "Batch of telemetry events sent by a monitoring agent to POST /api/v1/telemetry/ingest. Normative: spec CAP-PFE-2026-TEL-084 section 8.1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "batchId", "agent", "events"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "batchId": { "type": "string", "format": "uuid" },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "agentVersion", "sentAt"],
+      "properties": {
+        "agentId": { "$ref": "#/$defs/identifier" },
+        "agentVersion": { "$ref": "#/$defs/identifier" },
+        "sentAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "nonNegative": { "type": "number", "minimum": 0 },
+    "percent": { "type": "number", "minimum": 0, "maximum": 100 },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "timestamp", "intervalSeconds", "resource", "metrics"],
+      "properties": {
+        "eventId": { "type": "string", "format": "uuid" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "intervalSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["serviceName", "instanceId", "environment", "region"],
+          "properties": {
+            "serviceName": { "$ref": "#/$defs/identifier" },
+            "instanceId": { "$ref": "#/$defs/identifier" },
+            "environment": { "enum": ["dev", "staging", "prod"] },
+            "region": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpuUsagePercent", "memoryUsedBytes", "memoryLimitBytes",
+            "networkRxBytesPerSec", "networkTxBytesPerSec",
+            "diskReadBytesPerSec", "diskWriteBytesPerSec",
+            "activeThreadCount", "httpRequestsPerSec",
+            "httpErrorRatePercent", "httpLatencyP95Ms", "gcPauseMsPerMin"
+          ],
+          "properties": {
+            "cpuUsagePercent": { "$ref": "#/$defs/percent" },
+            "memoryUsedBytes": { "type": "integer", "minimum": 0 },
+            "memoryLimitBytes": { "type": "integer", "minimum": 1 },
+            "networkRxBytesPerSec": { "$ref": "#/$defs/nonNegative" },
+            "networkTxBytesPerSec": { "$ref": "#/$defs/nonNegative" },
+            "diskReadBytesPerSec": { "$ref": "#/$defs/nonNegative" },
+            "diskWriteBytesPerSec": { "$ref": "#/$defs/nonNegative" },
+            "activeThreadCount": { "type": "integer", "minimum": 0 },
+            "httpRequestsPerSec": { "$ref": "#/$defs/nonNegative" },
+            "httpErrorRatePercent": { "$ref": "#/$defs/percent" },
+            "httpLatencyP95Ms": { "$ref": "#/$defs/nonNegative" },
+            "gcPauseMsPerMin": { "$ref": "#/$defs/nonNegative" }
+          }
+        }
+      }
+    }
+  }
+}

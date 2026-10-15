@@ -1,0 +1,83 @@
+openapi: 3.1.0
+info:
+  title: Analytics query API
+  version: 0.1.0
+  description: |
+    Query API of the analytics service (spec 8.2, FR-ANA-03). Stage 2 (walking skeleton) offers one endpoint:
+    the raw series of one instance. Automatic granularity, cursor pagination and the other endpoints of spec 8.2
+    follow in week 14; JWT security (role VIEWER) follows with Keycloak.
+servers:
+  - url: http://localhost:8082
+paths:
+  /api/v1/analytics/instances/{instanceId}/series:
+    get:
+      summary: Time series of one metric of one instance, with the anomaly score of each point
+      parameters:
+        - name: instanceId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" }
+        - name: metric
+          in: query
+          required: true
+          description: A metric name of the ingest contract (telemetry-batch.1.0.json, events[].metrics).
+          schema:
+            enum: [cpuUsagePercent, memoryUsedBytes, memoryLimitBytes, networkRxBytesPerSec, networkTxBytesPerSec,
+                   diskReadBytesPerSec, diskWriteBytesPerSec, activeThreadCount, httpRequestsPerSec,
+                   httpErrorRatePercent, httpLatencyP95Ms, gcPauseMsPerMin]
+        - name: from
+          in: query
+          required: true
+          description: Start of the window, inclusive (RFC 3339).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: true
+          description: End of the window, exclusive (RFC 3339). Must be after `from`; at most 7 days after it.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Points in time order, at most 2,000 (FR-ANA-03 hard limit). `truncated` is true when more exist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Series" }
+        "400":
+          description: Unknown metric, bad instanceId, bad or missing time window
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+        "503":
+          description: The database is unavailable (spec 6.8)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+components:
+  schemas:
+    Series:
+      type: object
+      required: [instanceId, metric, from, to, points, truncated]
+      properties:
+        instanceId: { type: string }
+        metric: { type: string }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        truncated: { type: boolean }
+        points:
+          type: array
+          maxItems: 2000
+          items:
+            type: object
+            required: [time, value, anomalyProb, isAnomaly]
+            properties:
+              time: { type: string, format: date-time }
+              value: { type: number }
+              anomalyProb: { type: number, minimum: 0, maximum: 1 }
+              isAnomaly: { type: boolean }
+    Problem:
+      description: RFC 9457 problem details
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }

@@ -1,0 +1,19 @@
+# Images are built with the repository root as context (they need libs/telemetry-contracts).
+# Keep everything else out so builds are fast and no local secrets or data end up in an image.
+.git
+.env
+*.pdf
+**/.venv
+**/venv
+**/target
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/*.egg-info
+**/node_modules
+simulator/data
+bench/results
+docs
+ml
+.idea
+.vscode

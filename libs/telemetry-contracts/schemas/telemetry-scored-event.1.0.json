@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.telemetry.local/schemas/telemetry-scored-event/1.0.json",
+  "title": "TelemetryScoredEvent",
+  "description": "Value of one Kafka record on topic telemetry.scored.v1 (key = resource.instanceId). It is one telemetry.raw.v1 record, unchanged, plus the detection result 'prediction' and 'scoredAt'. Spec CAP-PFE-2026-TEL-084 sections 8.3 and FR-DET-03. All other fields must stay identical to telemetry-raw-event.1.0.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "timestamp",
+    "intervalSeconds",
+    "resource",
+    "metrics",
+    "receivedAt",
+    "agentId",
+    "batchId",
+    "prediction",
+    "scoredAt"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "intervalSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "serviceName",
+        "instanceId",
+        "environment",
+        "region"
+      ],
+      "properties": {
+        "serviceName": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instanceId": {
+          "$ref": "#/$defs/identifier"
+        },
+        "environment": {
+          "enum": [
+            "dev",
+            "staging",
+            "prod"
+          ]
+        },
+        "region": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuUsagePercent",
+        "memoryUsedBytes",
+        "memoryLimitBytes",
+        "networkRxBytesPerSec",
+        "networkTxBytesPerSec",
+        "diskReadBytesPerSec",
+        "diskWriteBytesPerSec",
+        "activeThreadCount",
+        "httpRequestsPerSec",
+        "httpErrorRatePercent",
+        "httpLatencyP95Ms",
+        "gcPauseMsPerMin"
+      ],
+      "properties": {
+        "cpuUsagePercent": {
+          "$ref": "#/$defs/percent"
+        },
+        "memoryUsedBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "memoryLimitBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "networkRxBytesPerSec": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "networkTxBytesPerSec": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "diskReadBytesPerSec": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "diskWriteBytesPerSec": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "activeThreadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "httpRequestsPerSec": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "httpErrorRatePercent": {
+          "$ref": "#/$defs/percent"
+        },
+        "httpLatencyP95Ms": {
+          "$ref": "#/$defs/nonNegative"
+        },
+        "gcPauseMsPerMin": {
+          "$ref": "#/$defs/nonNegative"
+        }
+      }
+    },
+    "receivedAt": {
+      "description": "Gateway clock (UTC) when the HTTP request was received. Stored as telemetry_event.received_at.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "agentId": {
+      "description": "Agent that sent the batch, as authenticated by its API key.",
+      "$ref": "#/$defs/identifier"
+    },
+    "batchId": {
+      "description": "batchId of the ingest request that carried this event (tracing).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "prediction": {
+      "description": "Output of the detection model for this event (spec 7.3 Prediction).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "probability",
+        "isAnomaly",
+        "threshold",
+        "modelVersion",
+        "featureSetVersion",
+        "warmup"
+      ],
+      "properties": {
+        "probability": {
+          "description": "Calibrated anomaly probability.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "isAnomaly": {
+          "description": "True when probability >= threshold.",
+          "type": "boolean"
+        },
+        "threshold": {
+          "description": "Operating threshold of the model that scored the event.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "modelVersion": {
+          "description": "Version of the model artefact. The pass-through stub uses 'stub-0'.",
+          "$ref": "#/$defs/identifier"
+        },
+        "featureSetVersion": {
+          "description": "Version of the feature set used (telemetry-features library).",
+          "$ref": "#/$defs/identifier"
+        },
+        "warmup": {
+          "description": "True for the first events of an instance after a cold start (FR-DET-09); stored but excluded from SLO and quality metrics.",
+          "type": "boolean"
+        }
+      }
+    },
+    "scoredAt": {
+      "description": "Detection service clock (UTC) when the prediction was produced. Stored as telemetry_event.scored_at.",
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "nonNegative": {
+      "type": "number",
+      "minimum": 0
+    },
+    "percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    }
+  }
+}

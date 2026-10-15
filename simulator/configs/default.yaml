@@ -1,0 +1,25 @@
+# Fleet simulator configuration (spec FR-SIM-02, 4.1).
+# Stage 1 = "v0": NORMAL traffic only. Fault scenarios S1-S7 and benign confounders B1-B5
+# (spec 9.1) are added in stage 3; the keys are already reserved below so config files stay valid.
+
+fleet:
+  seed: 42                    # same seed + same config + same numpy version = identical data
+  services: 35                # logical services
+  instances_per_service: 10   # 35 x 10 = 350 instances
+  interval_seconds: 15        # one event per instance per interval -> 2,016,000 events per day
+  environment: prod           # dev | staging | prod
+  regions: [eu-south-1, eu-west-1, eu-central-1]
+
+sampling:
+  drop_rate: 0.0              # share of samples that never arrive. 0.0 = exactly 2,016,000/day.
+                              # Spec B5 uses 0.02 once confounders are added in stage 3.
+
+agent:
+  version: "1.0.0"
+  # One agent per service ("agent-<service>"). DEV-ONLY key rule; the gateway seed data of stage 2
+  # registers the same keys. Real keys are 256-bit random values (spec 11.2).
+  api_key_template: "dev-{agent_id}"
+
+# Reserved for stage 3 (must stay empty in v0, otherwise the simulator refuses to start):
+scenarios: []
+confounders: {}

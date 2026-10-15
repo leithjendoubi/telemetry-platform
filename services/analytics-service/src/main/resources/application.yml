@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: analytics-service
+  threads:
+    virtual:
+      enabled: true                       # spec 6.5: MVC + blocking JDBC on virtual threads
+  mvc:
+    problemdetails:
+      enabled: true                       # errors as RFC 9457 application/problem+json (spec 8.2)
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  datasource:
+    # database per service: only analytics_db, only the analytics role (rule 2)
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/analytics_db
+    username: ${ANALYTICS_DB_USER:analytics}
+    password: ${ANALYTICS_DB_PASSWORD:analytics_dev_only}   # local dev value from .env.example
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: analytics-writer          # spec 8.3 consumer "ana-writer"
+      auto-offset-reset: earliest
+      enable-auto-commit: false           # offsets are committed by the container, after the database commit
+      max-poll-records: 500               # FR-ANA-01: up to 500 events ...
+      fetch-max-wait: 200ms               # ... or 200 ms
+      fetch-min-size: 65536
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+    producer:                             # only for the dead-letter topic
+      key-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        delivery.timeout.ms: 10000
+        request.timeout.ms: 5000
+        max.block.ms: 5000
+    listener:
+      type: batch
+      ack-mode: batch
+
+server:
+  port: 8082                              # 8080 = Pi-hole on the dev machine, 8081 = ingestion gateway
+  shutdown: graceful
+
+analytics:
+  version: 0.1.0
+  max-points: 2000                        # FR-ANA-03 hard limit per series
+  max-window: 7d
+  kafka:
+    scored-topic: telemetry.scored.v1
+    dlq-topic: telemetry.scored.v1.dlq
+    retry-interval-ms: 2000
+
+# Probes at /health/live and /health/ready (spec 8.2); ready includes the database.
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        live:
+          include: livenessState
+        ready:
+          include: readinessState,db

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "detection-service"
+version = "0.1.0"
+description = "Detection service. Stage 2: pass-through stub telemetry.raw.v1 -> telemetry.scored.v1 (spec FR-DET, CLAUDE.md step 2)"
+requires-python = ">=3.12"
+dependencies = [
+  "confluent-kafka>=2.6,<3",   # spec 6.5
+  "jsonschema>=4.18,<5",       # checks incoming records against libs/telemetry-contracts
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs the compose Kafka on localhost:9092 (skipped when it is not reachable)"]

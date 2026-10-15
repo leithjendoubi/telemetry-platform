@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: ingestion-gateway
+  lifecycle:
+    timeout-per-shutdown-phase: 30s       # FR-ING-11: finish in-flight requests within 30 s on SIGTERM
+  config:
+    # Dev agents of the simulator (skeleton only; week 5 moves agents to ingestion_db).
+    import: "optional:classpath:dev-agents.yml"
+
+server:
+  port: 8081                              # 8080 is used by a Pi-hole on the dev machine
+  shutdown: graceful
+
+gateway:
+  version: 0.1.0
+  max-body-bytes: 262144                  # 256 KiB (spec 8.1)
+  max-events: 100
+  max-event-age: 24h
+  max-clock-skew: 5m
+  retry-after: 5s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    raw-topic: telemetry.raw.v1
+
+# Probes at /health/live and /health/ready (spec 8.2). Prometheus /metrics comes with observability in week 5.
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        live:
+          include: livenessState
+        ready:
+          include: readinessState

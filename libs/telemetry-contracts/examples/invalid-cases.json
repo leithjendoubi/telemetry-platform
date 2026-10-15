@@ -1,0 +1,26 @@
+{
+  "_comment": "Each case is the valid example with one JSON-Pointer change applied. 'set' replaces a value, 'remove' deletes it. 'expect' says which layer must reject it: SCHEMA (JSON Schema) or SEMANTIC (extra rules of spec 8.1 applied per event). Used by the simulator tests now and by the gateway tests in stage 2.",
+  "base": "valid-batch.json",
+  "cases": [
+    { "name": "wrong-schema-version",      "set": { "/schemaVersion": "2.0" },                         "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "missing-batch-id",          "remove": ["/batchId"],                                     "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "empty-events",              "set": { "/events": [] },                                   "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "unknown-top-level-field",   "set": { "/extra": 1 },                                     "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "unknown-metric-field",      "set": { "/events/0/metrics/gpuUsagePercent": 5.0 },        "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "cpu-over-100",              "set": { "/events/0/metrics/cpuUsagePercent": 100.5 },      "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "negative-latency",          "set": { "/events/0/metrics/httpLatencyP95Ms": -1 },        "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "memory-limit-zero",         "set": { "/events/0/metrics/memoryLimitBytes": 0 },         "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "threads-not-integer",       "set": { "/events/0/metrics/activeThreadCount": 11.5 },     "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "bad-environment",           "set": { "/events/0/resource/environment": "production" },  "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "identifier-with-space",     "set": { "/events/0/resource/instanceId": "checkout api 07" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
+    { "name": "identifier-injection",      "set": { "/events/0/resource/serviceName": "x'; DROP TABLE t;--" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
+    { "name": "interval-zero",             "set": { "/events/0/intervalSeconds": 0 },                  "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "memory-used-over-limit",    "set": { "/events/0/metrics/memoryUsedBytes": 3000000000 }, "expect": "SEMANTIC", "code": "SEMANTIC_VIOLATION" },
+    { "name": "timestamp-too-old",         "set": { "/events/0/timestamp": "RELATIVE:-25h" },          "expect": "SEMANTIC", "code": "TIMESTAMP_OUT_OF_RANGE" },
+    { "name": "timestamp-in-the-future",   "set": { "/events/0/timestamp": "RELATIVE:+10m" },          "expect": "SEMANTIC", "code": "TIMESTAMP_OUT_OF_RANGE" }
+  ],
+  "notes": [
+    "A value of the form RELATIVE:<+|-><n><h|m> means 'now plus/minus that amount, in UTC'. The valid example has a fixed 2026 timestamp, so tests that check the 24 h / 5 min window must first set the timestamp relative to the current time.",
+    "DUPLICATE_EVENT_ID and SERVICE_NOT_PERMITTED need more than one event or an agent registry, so they are covered by the gateway tests (stage 2), not by this file."
+  ]
+}

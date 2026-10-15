@@ -1,0 +1,6 @@
+# Shell scripts are mounted into Linux containers: they must keep LF line endings,
+# even when the repository is checked out on Windows (CRLF would break "#!/usr/bin/env bash").
+*.sh   text eol=lf
+Makefile text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
