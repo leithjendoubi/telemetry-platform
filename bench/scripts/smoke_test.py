@@ -1,6 +1,7 @@
 """End-to-end smoke test of the walking skeleton (spec 16.2 week 4, gate G1).
 
-    simulator -> gateway -> telemetry.raw.v1 -> detection stub -> telemetry.scored.v1 -> analytics -> TimescaleDB -> query API
+    simulator -> gateway -> telemetry.raw.v1 -> detection stub -> telemetry.scored.v1
+              -> analytics -> TimescaleDB -> query API
 
 It starts the compose stack, sends traffic with the simulator, then reconciles every hop:
 the number of events the gateway accepted must be the number of records on both topics, the number of rows in
@@ -10,8 +11,8 @@ Run it with the simulator's Python, from the repository root (PowerShell):
 
     simulator\\.venv\\Scripts\\python bench\\scripts\\smoke_test.py --clean
 
---clean first runs `docker compose down -v`, which DELETES all Kafka and TimescaleDB data of this stack, so the
-counts start from zero. Without --clean the stack must already be empty, otherwise the test refuses to run:
+--clean first runs `docker compose down -v`, which DELETES all Kafka and TimescaleDB data of this stack, so
+the counts start from zero. Without --clean the stack must already be empty, or the test refuses to run:
 the simulator is deterministic, so leftovers from earlier runs would make the counts meaningless.
 
 Exit code 0 = every check passed.
@@ -27,12 +28,20 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPOSE = ["docker", "compose", "-f", str(ROOT / "infra/compose/docker-compose.yml"), "--profile", "core",
-           "--env-file", str(ROOT / ".env")]
+COMPOSE = [
+    "docker",
+    "compose",
+    "-f",
+    str(ROOT / "infra/compose/docker-compose.yml"),
+    "--profile",
+    "core",
+    "--env-file",
+    str(ROOT / ".env"),
+]
 KAFKA = "telemetry-kafka"
 DB = "telemetry-timescaledb"
 KAFKA_BIN = "/opt/kafka/bin"
@@ -42,10 +51,14 @@ ANALYTICS = "http://localhost:8082"
 
 # ---------------------------------------------------------------- small helpers
 
+
 def run(cmd: list[str], **kw) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    # commands are fixed lists built in this file (docker, the simulator); no shell, no outside input
+    result = subprocess.run(cmd, capture_output=True, text=True, **kw)  # noqa: S603
     if result.returncode != 0:
-        raise RuntimeError(f"command failed ({result.returncode}): {' '.join(cmd)}\n{result.stdout}\n{result.stderr}")
+        raise RuntimeError(
+            f"command failed ({result.returncode}): {' '.join(cmd)}\n{result.stdout}\n{result.stderr}"
+        )
     return result.stdout
 
 
@@ -55,28 +68,51 @@ def sql(query: str) -> str:
 
 def topic_records(topic: str) -> int:
     """Records ever written to a topic = sum of the end offsets of its partitions."""
-    out = run(["docker", "exec", KAFKA, f"{KAFKA_BIN}/kafka-get-offsets.sh", "--bootstrap-server", "localhost:19092",
-               "--topic", topic])
+    out = run(
+        [
+            "docker",
+            "exec",
+            KAFKA,
+            f"{KAFKA_BIN}/kafka-get-offsets.sh",
+            "--bootstrap-server",
+            "localhost:19092",
+            "--topic",
+            topic,
+        ]
+    )
     return sum(int(line.rsplit(":", 1)[1]) for line in out.splitlines() if line.count(":") >= 2)
 
 
 def group_lag(group: str) -> int | None:
     """Total lag of a consumer group, or None if the group has not committed anything yet."""
-    out = run(["docker", "exec", KAFKA, f"{KAFKA_BIN}/kafka-consumer-groups.sh", "--bootstrap-server",
-               "localhost:19092", "--describe", "--group", group])
-    lines = [l.split() for l in out.splitlines() if l.strip()]
-    header = next((l for l in lines if "LAG" in l), None)
+    out = run(
+        [
+            "docker",
+            "exec",
+            KAFKA,
+            f"{KAFKA_BIN}/kafka-consumer-groups.sh",
+            "--bootstrap-server",
+            "localhost:19092",
+            "--describe",
+            "--group",
+            group,
+        ]
+    )
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    header = next((row for row in rows if "LAG" in row), None)
     if header is None:
         return None
     i = header.index("LAG")
-    lags = [l[i] for l in lines if l is not header and len(l) > i]
+    lags = [row[i] for row in rows if row is not header and len(row) > i]
     if not lags or all(x == "-" for x in lags):
         return None
     return sum(int(x) for x in lags if x != "-")
 
 
 def http_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=10) as response:
+    if not url.startswith("http://localhost:"):
+        raise ValueError(f"unexpected URL {url}")
+    with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310 - checked just above
         return json.loads(response.read())
 
 
@@ -104,47 +140,69 @@ class Checks:
         print(f"{'check'.ljust(width)}  {'expected':>10}  {'actual':>10}  result")
         print("-" * (width + 36))
         for name, expected, actual, ok in self.rows:
-            print(f"{name.ljust(width)}  {str(expected):>10}  {str(actual):>10}  {'PASS' if ok else 'FAIL'}")
+            print(f"{name.ljust(width)}  {expected!s:>10}  {actual!s:>10}  {'PASS' if ok else 'FAIL'}")
         passed = all(r[3] for r in self.rows)
         print("-" * (width + 36))
-        print(f"SMOKE TEST {'PASSED' if passed else 'FAILED'}: {sum(r[3] for r in self.rows)}/{len(self.rows)} checks")
+        verdict = "PASSED" if passed else "FAILED"
+        print(f"SMOKE TEST {verdict}: {sum(r[3] for r in self.rows)}/{len(self.rows)} checks")
         return passed
 
 
 # ---------------------------------------------------------------- the test
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--clean", action="store_true", help="docker compose down -v first (DELETES the stack's data)")
+    parser.add_argument(
+        "--clean", action="store_true", help="docker compose down -v first (DELETES the stack's data)"
+    )
     parser.add_argument("--no-build", action="store_true", help="do not rebuild the service images")
     parser.add_argument("--speed", type=float, default=60)
     parser.add_argument("--duration", type=float, default=30)
-    parser.add_argument("--instances", type=int, default=350, help="instances of the simulator config (default fleet)")
+    parser.add_argument(
+        "--instances", type=int, default=350, help="instances of the simulator config (default fleet)"
+    )
     parser.add_argument("--services", type=int, default=35)
-    parser.add_argument("--timeout", type=float, default=180, help="seconds to wait for the pipeline to drain")
+    parser.add_argument(
+        "--timeout", type=float, default=180, help="seconds to wait for the pipeline to drain"
+    )
     args = parser.parse_args()
 
     # 1. stack up, from a clean state
     if args.clean:
         log("docker compose down -v  (deleting this stack's Kafka and TimescaleDB volumes)")
-        run(COMPOSE + ["down", "-v"])
+        run([*COMPOSE, "down", "-v"])
     log("docker compose up -d --wait" + ("" if args.no_build else " --build"))
-    run(COMPOSE + ["up", "-d", "--wait"] + ([] if args.no_build else ["--build"]), timeout=900)
+    run([*COMPOSE, "up", "-d", "--wait", *([] if args.no_build else ["--build"])], timeout=900)
 
     existing_rows = int(sql("SELECT count(*) FROM telemetry_event"))
     existing_raw = topic_records("telemetry.raw.v1")
     if existing_rows or existing_raw:
-        log(f"not a clean start: {existing_rows} rows, {existing_raw} raw records already present. Use --clean.")
+        log(f"not a clean start: {existing_rows} rows, {existing_raw} raw records present. Use --clean.")
         return 2
     log("stack is up and empty")
 
     # 2. traffic
     log(f"simulator: live --speed {args.speed:g} --duration {args.duration:g}")
-    wall_start = datetime.now(timezone.utc)
+    wall_start = datetime.now(UTC)
     env = dict(os.environ, PYTHONPATH=str(ROOT / "simulator" / "src"))
-    sim_out = run([sys.executable, "-m", "fleet_sim", "live", "--speed", str(args.speed), "--duration", str(args.duration),
-                   "--url", f"{GATEWAY}/api/v1/telemetry/ingest"], cwd=ROOT / "simulator", env=env,
-                  timeout=args.duration + 120)
+    sim_out = run(
+        [
+            sys.executable,
+            "-m",
+            "fleet_sim",
+            "live",
+            "--speed",
+            str(args.speed),
+            "--duration",
+            str(args.duration),
+            "--url",
+            f"{GATEWAY}/api/v1/telemetry/ingest",
+        ],
+        cwd=ROOT / "simulator",
+        env=env,
+        timeout=args.duration + 120,
+    )
     summary = sim_out.strip().splitlines()[-1]
     log(summary)
     numbers = {k: int(v) for k, v in re.findall(r"(\w+)=(\d+)", summary)}
@@ -175,20 +233,36 @@ def main() -> int:
     c.equal("lag of group analytics-writer", 0, group_lag("analytics-writer"))
     c.equal("db rows = accepted", accepted, rows)
     c.equal("db distinct event_id", rows, int(sql("SELECT count(DISTINCT event_id) FROM telemetry_event")))
-    c.equal("db instances", args.instances, int(sql("SELECT count(DISTINCT instance_id) FROM telemetry_event")))
-    c.equal("db services", args.services, int(sql("SELECT count(DISTINCT service_name) FROM telemetry_event")))
-    c.equal("db rows with model stub-0", rows,
-            int(sql("SELECT count(*) FROM telemetry_event WHERE model_version = 'stub-0' AND NOT is_anomaly")))
-    c.equal("db rows with received_at <= scored_at", rows,
-            int(sql("SELECT count(*) FROM telemetry_event WHERE received_at <= scored_at")))
+    c.equal(
+        "db instances", args.instances, int(sql("SELECT count(DISTINCT instance_id) FROM telemetry_event"))
+    )
+    c.equal(
+        "db services", args.services, int(sql("SELECT count(DISTINCT service_name) FROM telemetry_event"))
+    )
+    c.equal(
+        "db rows with model stub-0",
+        rows,
+        int(sql("SELECT count(*) FROM telemetry_event WHERE model_version = 'stub-0' AND NOT is_anomaly")),
+    )
+    c.equal(
+        "db rows with received_at <= scored_at",
+        rows,
+        int(sql("SELECT count(*) FROM telemetry_event WHERE received_at <= scored_at")),
+    )
 
     # 5. read one instance back over HTTP: same points as in the database
     instance = sql("SELECT instance_id FROM telemetry_event ORDER BY instance_id LIMIT 1")
-    db_points = int(sql(f"SELECT count(*) FROM telemetry_event WHERE instance_id = '{instance}'"))
-    window_from = (wall_start - timedelta(seconds=args.speed * args.duration) - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    window_to = (datetime.now(timezone.utc) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    series = http_json(f"{ANALYTICS}/api/v1/analytics/instances/{instance}/series"
-                       f"?metric=cpuUsagePercent&from={window_from}&to={window_to}")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", instance):  # contract identifier pattern
+        raise ValueError(f"unexpected instance id {instance!r}")
+    db_points = int(sql(f"SELECT count(*) FROM telemetry_event WHERE instance_id = '{instance}'"))  # noqa: S608
+    window_from = (
+        wall_start - timedelta(seconds=args.speed * args.duration) - timedelta(minutes=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    window_to = (datetime.now(UTC) + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    series = http_json(
+        f"{ANALYTICS}/api/v1/analytics/instances/{instance}/series"
+        f"?metric=cpuUsagePercent&from={window_from}&to={window_to}"
+    )
     times = [p["time"] for p in series["points"]]
     c.equal(f"api points of {instance}", db_points, len(series["points"]))
     c.true("api points in time order", times == sorted(times) and len(times) > 0)
