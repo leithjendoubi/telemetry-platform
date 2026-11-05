@@ -36,6 +36,10 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
   Everything else stays: contracts first, planted bugs, ADRs, simple explanations after each step.
 - Decisions that are Leith's or the supervisor's (accepting a risk, changing the spec stack, making the repository
   public) are asked, never recorded in his name without his answer.
+- Scope (Leith, 2026-11-05): build the **full spec as written**, in the order of spec 16.2. Where the spec decides, it
+  stands: **Spring Boot 3 stays** (spec 6.5; keep ADR-0006's time-boxed exception and renew it with a fresh check when it
+  expires); **Kafka producer timeout 2 s** (spec 6.8). If 2 s is technically unworkable (for example it conflicts with
+  `request.timeout.ms` + `linger.ms`), explain why and propose the nearest compliant setting instead of keeping 10 s.
 - Leith, 2026-11-05: "do your recommendations always, don't wait for my confirmations". Act on your own
   recommendations and report afterwards; only the decisions of the bullet above still wait for his answer.
 - Memory: the machine has 16 GB and runs low when the compose stack and the Testcontainers tests run together
@@ -211,7 +215,8 @@ Progress:
   overload (ADR-0009). Simulator treats Retry-After as a minimum. AT-04 integration test (incl. a neighbour agent with
   the same limits), `InFlightLimitIT` (socket holds a request); 54 unit + 37 IT green; planted bugs caught (one bucket
   for all agents, slot never released, Retry-After rounded down). Buckets are per gateway instance (shared store
-  needed before scaling out). Open point: spec 6.8 says producer timeout 2 s, the gateway uses delivery.timeout.ms 10 s.
+  needed before scaling out). Producer timeout now 2 s as spec 6.8 says (delivery 2 s, request 1.5 s, max.block 2 s;
+  changed 2026-11-05 on Leith's scope rule; ADR-0001 point 6 superseded).
 - A5 done 2026-11-05: sanitisation gaps found and fixed (ADR-0010): trailing newline passed identifier patterns
   (Java and Python `$`; fixed by reading `$` as end of text in both), `1e400` became `"Infinity"` in Kafka (new
   SEMANTIC_VIOLATION rule), offset timestamps passed unchanged (now UTC in the raw record). 6 new contract cases,
@@ -229,7 +234,7 @@ Progress:
   JSON logs (ECS, Boot 3.5 writes nested objects: `log.level` is `{"log":{"level":...}}`). Tests need
   `@AutoConfigureObservability` to see `/metrics`. Smoke test checks `gateway_events_accepted_total` = accepted.
   ArchUnit caught an api<->config cycle (GatewayMetrics moved to its own package). Next: B1 for analytics, detection.
-- Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
+- Repository visibility: **public, decided by Leith on 2026-11-05** ("keep it public").
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)
 Goal (gate G1): **simulator -> gateway -> Kafka -> pass-through stub -> analytics writer ->

@@ -23,7 +23,7 @@ Java 21, Spring Boot 3.5 WebFlux, reactor-kafka, networknt json-schema-validator
 | `agent.agentId` is not the agent that owns the key | 403 |
 | each event: schema, allowed service, timestamp window (-24 h / +5 min), memoryUsed <= memoryLimit, duplicate eventId | event rejected with its code, the others carry on |
 | valid events to `telemetry.raw.v1` (key = `instanceId`), rejected ones to `telemetry.rejected.v1` (key = `agentId`); `acks=all`, idempotent producer | **202** with `accepted`, `rejected`, `rejections[]`, once Kafka acknowledged every record |
-| Kafka does not acknowledge within ~10 s | 503 with `Retry-After: 5` (also for a fully rejected batch: its rejections must be recorded, ADR-0007) |
+| Kafka does not acknowledge within 2 s (spec 6.8) | 503 with `Retry-After: 5` (also for a fully rejected batch: its rejections must be recorded, ADR-0007) |
 
 Errors are RFC 9457 problem details (`application/problem+json`). `X-Request-Id` is echoed. A rejection message is at
 most 1000 characters (longer ones are cut and end with `[...]`).

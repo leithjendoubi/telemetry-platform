@@ -69,12 +69,25 @@ public class GatewayConfig {
 
     /**
      * Kafka producer settings (FR-ING-07). Durability first: acks=all and the idempotent producer, so a retry
-     * inside the client never writes a record twice. The timeouts are short on purpose: if Kafka is down the
-     * agent should get 503 within seconds and retry later (spec 6.8), not wait the 2-minute client default.
+     * inside the client never writes a record twice. Spec 6.8: producer timeout 2 s, so a slow or absent broker gives
+     * the agent a 503 quickly and it retries later. delivery.timeout.ms (2 s, Kafka's bound from send() to success or
+     * failure) must be at least linger.ms + request.timeout.ms (5 ms + 1.5 s), or the producer refuses to start.
+     * max.block.ms (2 s) bounds waiting for metadata or buffer space before that, when the broker is unreachable.
      */
     @Bean(destroyMethod = "close")
     KafkaSender<String, byte[]> kafkaSender(
             GatewayProperties props, @Value("${spring.application.name}") String appName) {
+        KafkaSender<String, byte[]> sender =
+                KafkaSender.create(SenderOptions.<String, byte[]>create(producerConfig(props, appName)));
+        // FR-ING-02: reactor-kafka creates the producer lazily, on the first send, i.e. on a Netty event-loop
+        // thread; creating it reads files and starts threads (found by BlockHound on 2026-11-05). Create it here, at
+        // start-up. This does not contact the broker, so the gateway still starts while Kafka is down.
+        sender.doOnProducer(producer -> producer.metrics().size()).block(Duration.ofSeconds(30));
+        return sender;
+    }
+
+    /** The producer settings described above; settings under gateway.kafka.producer override them. */
+    static Map<String, Object> producerConfig(GatewayProperties props, String appName) {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.kafka().bootstrapServers());
         config.put(ProducerConfig.CLIENT_ID_CONFIG, appName);
@@ -87,16 +100,11 @@ public class GatewayConfig {
                 5); // highest value that keeps ordering with idempotence
         config.put(ProducerConfig.LINGER_MS_CONFIG, 5);
         config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
-        config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5_000);
-        config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5_000);
-        config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10_000);
+        config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 2_000);
+        config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 1_500);
+        config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 2_000); // spec 6.8: producer timeout 2 s
         config.putAll(props.kafka().producer());
-        KafkaSender<String, byte[]> sender = KafkaSender.create(SenderOptions.<String, byte[]>create(config));
-        // FR-ING-02: reactor-kafka creates the producer lazily, on the first send, i.e. on a Netty event-loop
-        // thread; creating it reads files and starts threads (found by BlockHound on 2026-11-05). Create it here, at
-        // start-up. This does not contact the broker, so the gateway still starts while Kafka is down.
-        sender.doOnProducer(producer -> producer.metrics().size()).block(Duration.ofSeconds(30));
-        return sender;
+        return config;
     }
 
     @Bean

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import javax.management.ObjectName;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Test;
 import reactor.kafka.sender.KafkaSender;
 
@@ -20,18 +21,24 @@ import reactor.kafka.sender.KafkaSender;
  */
 class KafkaSenderStartupTest {
 
+    /** Spec 6.8: producer timeout 2 s; Kafka itself checks that the timeouts fit together (ProducerConfig). */
+    @Test
+    void producerTimeoutIsTheTwoSecondsOfSpec68AndKafkaAcceptsTheSettings() {
+        ProducerConfig config = new ProducerConfig(GatewayConfig.producerConfig(props(), "timeout-test"));
+        assertThat(config.getInt(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)).isEqualTo(2_000);
+        assertThat(config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG)
+                        + config.getLong(ProducerConfig.LINGER_MS_CONFIG))
+                .as("Kafka requires delivery.timeout.ms >= linger.ms + request.timeout.ms")
+                .isLessThanOrEqualTo(2_000);
+        assertThat(config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG)).isLessThanOrEqualTo(2_000L);
+        assertThat(config.getString(ProducerConfig.ACKS_CONFIG)).isEqualTo("-1"); // "all"
+        assertThat(config.getBoolean(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG)).isTrue();
+    }
+
     @Test
     void theProducerExistsBeforeTheFirstSend() throws Exception {
         String clientId = "startup-test-" + UUID.randomUUID();
-        GatewayProperties props = new GatewayProperties(
-                262_144,
-                100,
-                Duration.ofHours(24),
-                Duration.ofMinutes(5),
-                Duration.ofSeconds(5),
-                2000,
-                new GatewayProperties.Kafka("localhost:1", "telemetry.raw.v1", "telemetry.rejected.v1", Map.of()),
-                new GatewayProperties.Registry(Duration.ofSeconds(10), 10_000, Duration.ofSeconds(2)));
+        GatewayProperties props = props();
         ObjectName appInfo = new ObjectName("kafka.producer:type=app-info,id=" + clientId);
 
         KafkaSender<String, byte[]> sender = new GatewayConfig().kafkaSender(props, clientId);
@@ -42,5 +49,17 @@ class KafkaSenderStartupTest {
         } finally {
             sender.close();
         }
+    }
+
+    private static GatewayProperties props() {
+        return new GatewayProperties(
+                262_144,
+                100,
+                Duration.ofHours(24),
+                Duration.ofMinutes(5),
+                Duration.ofSeconds(5),
+                2000,
+                new GatewayProperties.Kafka("localhost:1", "telemetry.raw.v1", "telemetry.rejected.v1", Map.of()),
+                new GatewayProperties.Registry(Duration.ofSeconds(10), 10_000, Duration.ofSeconds(2)));
     }
 }

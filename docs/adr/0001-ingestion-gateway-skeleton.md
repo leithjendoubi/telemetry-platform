@@ -26,7 +26,9 @@ Several small choices were not fixed by the spec.
    eventId twice.
 5. **Agents from configuration** (`dev-agents.yml`, SHA-256 hashes only) until the `ingestion_db` registry of week 5.
    `serviceName` allow-lists and the agentId/key match (403) are already enforced because they cost almost nothing.
-6. **Short producer timeouts** (`max.block.ms` 5 s, `delivery.timeout.ms` 10 s) so a Kafka outage becomes a fast 503
+6. **Short producer timeouts** (`max.block.ms` 5 s, `delivery.timeout.ms` 10 s; **superseded 2026-11-05**: spec 6.8
+   says producer timeout 2 s, so now `delivery.timeout.ms` 2 s, `request.timeout.ms` 1.5 s, `max.block.ms` 2 s, see
+   `GatewayConfig`) so a Kafka outage becomes a fast 503
    that agents retry (spec 6.8), instead of requests hanging for the 2-minute client default. If any record of a batch
    fails, the whole batch gets 503; the agent resends it and the analytics writer's `ON CONFLICT DO NOTHING`
    absorbs the duplicates (at-least-once, ADR-007 of the spec).
