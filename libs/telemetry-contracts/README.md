@@ -12,6 +12,8 @@ It contains data shapes only, never business logic.
 | `examples/raw-event.json` | Example record of `telemetry.raw.v1`. Must always validate. |
 | `schemas/telemetry-scored-event.1.0.json` | Value of one Kafka record on `telemetry.scored.v1` (spec 8.3, FR-DET-03): one raw record plus `prediction` and `scoredAt`. |
 | `examples/scored-event.json` | Example record of `telemetry.scored.v1` (pass-through stub values). Must always validate. |
+| `schemas/telemetry-rejected-event.1.0.json` | Value of one Kafka record on `telemetry.rejected.v1` (spec 8.3, FR-ING-07): one rejected event with its reason code. |
+| `examples/rejected-event.json` | Example record of `telemetry.rejected.v1`. Must always validate. |
 | `openapi/analytics-api.yaml` | OpenAPI 3.1 of the analytics query API (spec 8.2). Stage 2: one endpoint, the series of one instance. |
 
 ## Kafka record of `telemetry.raw.v1` (produced by the ingestion gateway)
@@ -38,6 +40,16 @@ These rules of spec 8.1 are applied by code after schema validation, one event a
 | duplicate `eventId` inside one batch | `DUPLICATE_EVENT_ID` |
 | `serviceName` not in the agent's allow-list | `SERVICE_NOT_PERMITTED` |
 | any schema violation of the event | `SCHEMA_VIOLATION` |
+
+## Kafka record of `telemetry.rejected.v1` (produced by the ingestion gateway)
+
+- **One record per rejected event** of a batch whose envelope was valid (a batch rejected as a whole with 400/401/403/413/415
+  produces no record: there is no trustworthy event to report).
+- **Key:** `agentId` (spec 8.3), so the audit trail of one agent stays in order.
+- **Value:** UTF-8 JSON matching `telemetry-rejected-event.1.0.json`: `index`, `eventId`, `code`, `message` exactly as in the 202
+  response's `rejections` list, plus `agentId`, `batchId`, `receivedAt`, and `event` = the event exactly as sent.
+  Consumers must treat `event` and `eventId` as untrusted input.
+- **Headers:** `event-type` = `TelemetryRejected`, `schema-version` = `1.0`, `produced-at`, `producer` = `ingestion-gateway/<version>`.
 
 ## Kafka record of `telemetry.scored.v1` (produced by the detection service)
 

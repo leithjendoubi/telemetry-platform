@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.telemetry.local/schemas/telemetry-rejected-event/1.0.json",
+  "title": "TelemetryRejectedEvent",
+  "description": "Value of one Kafka record on topic telemetry.rejected.v1 (key = agentId), one per rejected event of an ingest batch (FR-ING-07, AT-02). Spec CAP-PFE-2026-TEL-084 section 8.3: 'rejected event fragment, reason code'. index, eventId, code and message are exactly the entry of the 202 response's rejections list (spec 8.1); agentId, batchId and receivedAt are defined as in telemetry-raw-event.1.0.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agentId", "batchId", "receivedAt", "index", "eventId", "code", "message", "event"],
+  "properties": {
+    "agentId": {
+      "description": "Agent that sent the batch, as authenticated by its API key.",
+      "$ref": "#/$defs/identifier"
+    },
+    "batchId": {
+      "description": "batchId of the ingest request that carried this event (tracing).",
+      "type": "string", "format": "uuid"
+    },
+    "receivedAt": {
+      "description": "Gateway clock (UTC) when the HTTP request was received.",
+      "type": "string", "format": "date-time"
+    },
+    "index": {
+      "description": "Position of the event in the request's events array.",
+      "type": "integer", "minimum": 0, "maximum": 99
+    },
+    "eventId": {
+      "description": "The event's eventId as sent, or null when it is missing or not a string. Not trusted: it may break the UUID format.",
+      "type": ["string", "null"]
+    },
+    "code": {
+      "description": "Reason code (libs/telemetry-contracts/README.md). One code per event: the first rule broken.",
+      "enum": ["SCHEMA_VIOLATION", "TIMESTAMP_OUT_OF_RANGE", "SEMANTIC_VIOLATION", "DUPLICATE_EVENT_ID", "SERVICE_NOT_PERMITTED"]
+    },
+    "message": {
+      "description": "Human-readable reason, the same text as in the 202 response.",
+      "type": "string", "maxLength": 1000
+    },
+    "event": {
+      "description": "The rejected event exactly as the agent sent it (the 'fragment' of spec 8.3). Any JSON value, because a schema violation may mean it is not even an object. Never trusted by consumers."
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    }
+  }
+}

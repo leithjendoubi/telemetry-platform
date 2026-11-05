@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
+import com.networknt.schema.JsonSchema;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SchemaValidatorsConfig;
+import com.networknt.schema.SpecVersion;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
@@ -55,6 +59,24 @@ public final class ContractFiles {
                 throw new IllegalStateException(resource + " not on the test classpath");
             }
             return MAPPER.readTree(in);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** A schema of libs/telemetry-contracts/schemas (in the jar), with format checks on, e.g. "telemetry-raw-event.1.0.json". */
+    public static JsonSchema schema(String fileName) {
+        try (InputStream in =
+                ContractFiles.class.getClassLoader().getResourceAsStream("contracts/schemas/" + fileName)) {
+            if (in == null) {
+                throw new IllegalStateException(fileName + " not on the classpath");
+            }
+            return JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+                    .getSchema(
+                            in,
+                            SchemaValidatorsConfig.builder()
+                                    .formatAssertionsEnabled(true)
+                                    .build());
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }

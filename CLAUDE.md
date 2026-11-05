@@ -72,7 +72,7 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
   when the detection container is stopped mid-run, and that the backlog drains after restart.
 - **Gate G1 complete 2026-11-05: the smoke test runs in CI.** GitHub Actions run 42021118733, all 6 stages green
   (21/21 smoke checks, 42,000 sent = accepted = rows = distinct eventIds).
-- Next: spec 16.2 week 5 (gateway hardening + observability baseline). Plan it with Leith first.
+- **Now: week 5**, plan approved by Leith 2026-11-05 (section "Week 5 plan" below). Progress is tracked there.
 
 **CI and repository (since 2026-11-05).** Public repo https://github.com/leithjendoubi/telemetry-platform, branch `main`.
 `gh` CLI at `C:\Program Files\GitHub CLI\gh.exe` (logged in as leithjendoubi, scopes incl. `workflow`); commits use the
@@ -147,6 +147,39 @@ PostgreSQL: `localhost:5432`; users and dev passwords are in `.env`.
 5. Every service gets automated tests, and tests must be able to fail (check this when it matters).
 6. Record significant decisions as short ADRs in `docs/adr/`.
 7. Keep `README.md`'s "Honest status" table true: what was verified and how.
+
+## Week 5 plan: gateway hardening + observability baseline (spec 16.2; approved 2026-11-05)
+Key outputs: **AT-02, AT-03, AT-04 passing; first Grafana dashboards.** Covers FR-ING-02, 04, 05, 06, 07 (rejected),
+08, 09, 11 and NFR-OBS-01. Every step: contracts first, a planted bug proves the new tests can fail, CI green after push.
+Decisions (Leith, 2026-11-05): traces in **Tempo**; **401** for missing or wrong keys, **403** for revoked keys and
+agent-ID mismatch (spec 8.1 error table; the first recommendation "401 for revoked" contradicted it and was dropped); agent cache **10 s** (a revocation takes effect within 10 s); `ingestion_db` schema by
+**Flyway over JDBC at startup only**, runtime access by R2DBC; **Part A before Part B**; if time runs out, A7 and B2 may
+move to week 6, AT-02..04 and the dashboards may not.
+
+Part A, gateway:
+- A1 Contract `telemetry-rejected-event.1.0.json` + example (spec 8.3: key agentId, fragment + reason code); Python and
+  Java contract tests.
+- A2 Publish rejected events to `telemetry.rejected.v1` -> **AT-02** integration test (raw, 202 body, rejected topic);
+  smoke test checks valid events are stored.
+- A3 Agent registry: `agent` table of spec 8.4 in `ingestion_db`, R2DBC `AgentRepository` with 10 s cache, dev agents
+  seeded by migration (replaces `dev-agents.yml`; move the Gitleaks exception) -> **AT-03** (nothing published).
+- A4 Bucket4j token bucket per agent from the registry (default 50 rps, burst 100) -> 429 + Retry-After; global in-flight
+  limit -> 503 + Retry-After; simulator honours Retry-After -> **AT-04** (other agents unaffected).
+- A5 Sanitisation (FR-ING-04): control characters, NaN/Infinity, unknown fields, UTC normalisation; new cases go into
+  `invalid-cases.json` first.
+- A6 BlockHound in the gateway tests (FR-ING-02); fix what it finds.
+- A7 gzip bodies, 256 KiB limit checked after decompression (FR-ING-08); graceful shutdown within 30 s (FR-ING-11).
+
+Part B, observability:
+- B1 `/metrics` (Prometheus) on all services; RED metrics; gateway metrics of spec 12.2; JSON logs with traceId.
+- B2 OTel Java agent + Python SDK; W3C `traceparent` over HTTP and Kafka headers, gateway to database.
+- B3 Compose profile `obs`: OTel Collector, Prometheus, Grafana, Tempo; config in `infra/observability/`.
+- B4 Provisioned Grafana dashboards "Platform health" and "Pipeline"; checked with data through the Grafana API.
+- C Smoke test covers AT-02..04; CI green; README, CLAUDE.md, ADRs.
+
+Progress:
+- A1 done 2026-11-05: `telemetry-rejected-event.1.0.json` + `rejected-event.json`; simulator contract tests (6) and gateway
+  `RejectedEventContractTest` (enum = schema codes); planted bugs caught (field not required, undocumented code, extra enum).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)
 Goal (gate G1): **simulator -> gateway -> Kafka -> pass-through stub -> analytics writer ->

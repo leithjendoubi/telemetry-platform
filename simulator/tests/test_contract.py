@@ -4,6 +4,7 @@ The same files are reused by the Java gateway tests in stage 2, so both sides te
 """
 
 import json
+import re
 import unittest
 from datetime import UTC, datetime, timedelta
 
@@ -149,6 +150,66 @@ class ScoredEventContractTests(unittest.TestCase):
             self.assertEqual(scored["properties"][name], definition, name)
         self.assertEqual(set(scored["required"]), set(raw["required"]) | {"prediction", "scoredAt"})
         self.assertEqual(scored["$defs"], raw["$defs"])
+
+
+class RejectedEventContractTests(unittest.TestCase):
+    """Record of telemetry.rejected.v1: one 202 rejections entry + agentId, batchId, receivedAt, event."""
+
+    @classmethod
+    def setUpClass(cls):
+        from jsonschema import Draft202012Validator, FormatChecker
+
+        cls.schema = helpers.load_json(helpers.REJECTED_EVENT_SCHEMA_PATH)
+        Draft202012Validator.check_schema(cls.schema)
+        cls.validator = Draft202012Validator(cls.schema, format_checker=FormatChecker())
+        cls.example = helpers.load_json(helpers.REJECTED_EVENT_EXAMPLE)
+
+    def errors(self, doc):
+        return [e.message for e in self.validator.iter_errors(doc)]
+
+    def test_example_passes_and_every_field_is_required(self):
+        self.assertEqual(self.errors(self.example), [])
+        # spec 8.1 rejections entry + the raw record's additions + the event fragment of spec 8.3
+        expected = {"index", "eventId", "code", "message", "agentId", "batchId", "receivedAt", "event"}
+        self.assertEqual(set(self.schema["required"]), expected)
+        for field in expected:
+            broken = dict(self.example)
+            del broken[field]
+            self.assertTrue(self.errors(broken), f"{field} must be required")
+
+    def test_untrusted_parts_may_be_anything_the_agent_sent(self):
+        for event, event_id in (("not an object", None), ([1, 2], "not-a-uuid"), (None, None)):
+            doc = dict(self.example, event=event, eventId=event_id, code="SCHEMA_VIOLATION")
+            self.assertEqual(self.errors(doc), [], repr(event))
+
+    def test_trusted_parts_are_checked(self):
+        for field, value in (
+            ("index", 100),
+            ("code", "UNKNOWN_CODE"),
+            ("agentId", "bad agent"),
+            ("batchId", "x"),
+        ):
+            self.assertTrue(self.errors(dict(self.example, **{field: value})), f"{field}={value!r} must fail")
+
+    def test_codes_are_those_of_the_contract_readme(self):
+        readme = helpers.CONTRACTS_README.read_text(encoding="utf-8")
+        section = readme.split("## What JSON Schema cannot check", 1)[1].split("\n## ", 1)[0]
+        documented = set(re.findall(r"\|\s*`([A-Z_]+)`\s*\|", section))
+        self.assertEqual(set(self.schema["properties"]["code"]["enum"]), documented)
+
+    def test_shared_fields_are_defined_as_in_the_raw_schema(self):
+        raw = helpers.load_json(helpers.RAW_EVENT_SCHEMA_PATH)
+
+        def without_description(d):
+            return {k: v for k, v in d.items() if k != "description"}
+
+        for name in ("agentId", "batchId", "receivedAt"):
+            self.assertEqual(
+                without_description(self.schema["properties"][name]),
+                without_description(raw["properties"][name]),
+                name,
+            )
+        self.assertEqual(self.schema["$defs"]["identifier"], raw["$defs"]["identifier"])
 
 
 class AnalyticsOpenApiContractTests(unittest.TestCase):
