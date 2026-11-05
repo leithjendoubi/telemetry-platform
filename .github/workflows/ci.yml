@@ -103,12 +103,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install Python tools
-        run: pip install semgrep==1.183.0 -e "simulator[dev]" -e "services/detection-service[dev]"
+      # The scanners run in their own isolated environments (pipx), never next to our code:
+      # Semgrep pins jsonschema ~=4.25 while our projects need >=4.26, and an audit of a shared
+      # environment would report the tools' own dependencies (pip, filelock, ...) as ours.
       - name: Code scan (Semgrep)
-        run: semgrep scan --config p/default --severity ERROR --error --metrics off
+        run: pipx run --spec semgrep==1.183.0 semgrep scan --config p/default --severity ERROR --error --metrics off
       - name: Python dependencies (pip-audit)
-        run: pip-audit --skip-editable
+        # audits the runtime dependencies each pyproject.toml declares, i.e. what goes into the images
+        run: |
+          pipx run --spec pip-audit==2.10.1 pip-audit simulator
+          pipx run --spec pip-audit==2.10.1 pip-audit services/detection-service
       - name: Java dependencies (OWASP Dependency-Check)
         # without the free NVD key the download of the vulnerability database takes hours
         if: env.NVD_API_KEY != ''
