@@ -21,6 +21,17 @@ server:
   port: 8081                              # 8080 is used by a Pi-hole on the dev machine
   shutdown: graceful
 
+# Spec 12.1: JSON logs on stdout with service and version (ECS format, built into Spring Boot 3.5).
+# traceId / spanId join with OpenTelemetry (week 5, step B2).
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: ${spring.application.name}
+        version: ${gateway.version}
+
 gateway:
   version: 0.1.0
   max-body-bytes: 262144                  # 256 KiB (spec 8.1)
@@ -38,13 +49,22 @@ gateway:
     cache-max-size: 10000
     lookup-timeout: 2s
 
-# Probes at /health/live and /health/ready (spec 8.2). Prometheus /metrics comes with observability in week 5.
+# Probes at /health/live and /health/ready, Prometheus metrics at /metrics (spec 8.2, FR-ING-09).
 management:
   endpoints:
     web:
       base-path: /
       exposure:
-        include: health
+        include: health,prometheus
+      path-mapping:
+        prometheus: metrics
+  metrics:
+    tags:
+      service: ${spring.application.name}  # spec 12: every series says which service it comes from
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true         # histogram buckets, so Grafana can compute p95 across instances
+        gateway.kafka.publish: true
   endpoint:
     health:
       probes:

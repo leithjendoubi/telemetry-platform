@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -61,6 +62,7 @@ import org.testcontainers.kafka.KafkaContainer;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient(timeout = "30s")
+@AutoConfigureObservability // Spring Boot turns metrics export off in tests unless asked; /metrics is tested here
 @Testcontainers
 class IngestControllerIT {
 
@@ -641,6 +643,53 @@ class IngestControllerIT {
                     .expectStatus()
                     .isBadRequest();
         }
+    }
+
+    /** FR-ING-09, spec 12.2: the gateway's metrics at /metrics in Prometheus format, counting what really happened. */
+    @Test
+    void metricsCountAcceptedAndRejectedEvents() {
+        double acceptedBefore = metric("gateway_events_accepted_total", "");
+        double schemaBefore = metric("gateway_events_rejected_total", "code=\"SCHEMA_VIOLATION\"");
+        double publishesBefore = metric("gateway_kafka_publish_seconds_count", "outcome=\"success\"");
+
+        post(halfValidBatchOf("agent-checkout-api"), KEY)
+                .exchange()
+                .expectStatus()
+                .isAccepted();
+
+        assertThat(metric("gateway_events_accepted_total", "") - acceptedBefore).isEqualTo(1.0);
+        assertThat(metric("gateway_events_rejected_total", "code=\"SCHEMA_VIOLATION\"") - schemaBefore)
+                .isEqualTo(1.0);
+        assertThat(metric("gateway_kafka_publish_seconds_count", "outcome=\"success\"") - publishesBefore)
+                .isEqualTo(1.0);
+        String all = metricsText();
+        assertThat(all)
+                .contains("gateway_requests_in_flight{service=\"ingestion-gateway\"}")
+                .contains("gateway_requests_rate_limited_total{service=\"ingestion-gateway\"}")
+                .contains("gateway_requests_overloaded_total{service=\"ingestion-gateway\"}")
+                .containsPattern(
+                        "http_server_requests_seconds_count\\{[^}]*status=\"202\"[^}]*uri=\"/api/v1/telemetry/ingest\"");
+    }
+
+    String metricsText() {
+        return client.get()
+                .uri("/metrics")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody(String.class)
+                .returnResult()
+                .getResponseBody();
+    }
+
+    /** The value of the one series of {@code name} whose labels contain {@code label} (0 if absent). */
+    double metric(String name, String label) {
+        for (String line : metricsText().split("\n")) {
+            if (line.startsWith(name + "{") && line.contains(label)) {
+                return Double.parseDouble(line.substring(line.lastIndexOf(' ') + 1));
+            }
+        }
+        return 0;
     }
 
     @Test

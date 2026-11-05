@@ -30,7 +30,15 @@ most 1000 characters (longer ones are cut and end with `[...]`).
 Kafka record formats are in `libs/telemetry-contracts` (`telemetry-raw-event.1.0.json`, `telemetry-rejected-event.1.0.json`
 and its README).
 
-Probes: `GET /health/live`, `GET /health/ready`.
+Probes: `GET /health/live`, `GET /health/ready`. Metrics: `GET /metrics` (Prometheus text, FR-ING-09):
+`http_server_requests_seconds` (rate, errors by status, duration), `gateway_events_accepted_total`,
+`gateway_events_rejected_total{code}`, `gateway_requests_rate_limited_total`, `gateway_requests_overloaded_total`,
+`gateway_requests_in_flight`, `gateway_kafka_publish_seconds{outcome}`; every series has `service="ingestion-gateway"`.
+Logs are JSON lines (ECS) with `service.name` and `service.version`.
+
+```powershell
+curl.exe -s http://localhost:8081/metrics | Select-String "^gateway_"
+```
 
 Rate limits are per gateway instance (ADR-0009). Change an agent's limit (takes effect within 10 s):
 `docker exec telemetry-timescaledb psql -U ingestion -d ingestion_db -c "UPDATE agent SET rate_limit_rps = 5, burst = 10 WHERE agent_id = 'agent-cart-api';"`

@@ -16,6 +16,7 @@ import com.tngtech.archunit.lang.ArchRule;
  *   publish ──▶ validation                    (the Kafka adapter sends accepted and rejected events)
  *   registry ──▶ auth                         (the database adapter returns agents)
  *   ratelimit ──▶ auth                        (token buckets per agent, in-flight cap: no Spring, no Reactor)
+ *   metrics ──▶ ratelimit, validation         (the gateway's Micrometer meters; used by api, built by config)
  *   auth, validation                          (pure rules: no Spring, no Kafka, no HTTP)
  *   config ──▶ everything                     (wiring only)
  * </pre>

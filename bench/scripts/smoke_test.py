@@ -116,6 +116,17 @@ def http_json(url: str) -> dict:
         return json.loads(response.read())
 
 
+def prometheus_value(url: str, series: str) -> float | None:
+    """Value of one series (name plus labels, as written in the exposition text) at a /metrics URL."""
+    if not url.startswith("http://localhost:"):
+        raise ValueError(f"unexpected URL {url}")
+    with urllib.request.urlopen(url, timeout=10) as response:  # noqa: S310 - checked just above
+        for line in response.read().decode("utf-8").splitlines():
+            if line.startswith(series + " "):
+                return float(line.rsplit(" ", 1)[1])
+    return None
+
+
 def container_health(name: str) -> str:
     return run(["docker", "inspect", "-f", "{{.State.Health.Status}}", name]).strip()
 
@@ -272,6 +283,13 @@ def main() -> int:
     c.equal("gateway /health/ready", "UP", http_json(f"{GATEWAY}/health/ready")["status"])
     c.equal("analytics /health/ready", "UP", http_json(f"{ANALYTICS}/health/ready")["status"])
     c.equal("detection container health", "healthy", container_health("telemetry-detection-service"))
+
+    # 7. metrics (FR-ING-09): the gateway counted exactly what it accepted, in the real container
+    c.equal(
+        "gateway /metrics events accepted",
+        float(accepted),
+        prometheus_value(f"{GATEWAY}/metrics", 'gateway_events_accepted_total{service="ingestion-gateway"}'),
+    )
 
     return 0 if c.report() else 1
 

@@ -223,6 +223,12 @@ Progress:
 - A7 done 2026-11-05: gzip bodies (limit checked after unpacking, zip bomb 413, broken gzip 400, other encodings 415);
   graceful shutdown proven by `GracefulShutdownIT` (6 s slow client, because Reactor Netty's "immediate" also waits a
   few seconds). ADR-0012. Gateway 70 unit + 48 IT green, 0 blocking calls. **Part A of week 5 complete.**
+- CI fix 2026-11-05: on Linux, BlockHound flagged the SCRAM nonce (`/dev/urandom` read) when R2DBC opens a connection;
+  narrow allowance `BlockHoundAllowances` (only `CryptoUtil.nonce`), proven loaded and narrow (ADR-0011).
+- B1 gateway done 2026-11-05: `/metrics` (Prometheus, spec 12.2 gateway metrics in package `metrics`, tag service),
+  JSON logs (ECS, Boot 3.5 writes nested objects: `log.level` is `{"log":{"level":...}}`). Tests need
+  `@AutoConfigureObservability` to see `/metrics`. Smoke test checks `gateway_events_accepted_total` = accepted.
+  ArchUnit caught an api<->config cycle (GatewayMetrics moved to its own package). Next: B1 for analytics, detection.
 - Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)

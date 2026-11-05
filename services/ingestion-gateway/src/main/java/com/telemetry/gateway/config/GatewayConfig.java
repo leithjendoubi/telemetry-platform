@@ -2,6 +2,7 @@ package com.telemetry.gateway.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Ticker;
+import com.telemetry.gateway.metrics.GatewayMetrics;
 import com.telemetry.gateway.publish.EventPublisher;
 import com.telemetry.gateway.ratelimit.AgentRateLimiter;
 import com.telemetry.gateway.ratelimit.InFlightLimiter;
@@ -9,6 +10,7 @@ import com.telemetry.gateway.registry.AgentRegistry;
 import com.telemetry.gateway.registry.R2dbcAgentLookup;
 import com.telemetry.gateway.validation.BatchValidator;
 import io.github.bucket4j.TimeMeter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
@@ -52,6 +54,12 @@ public class GatewayConfig {
     @Bean
     InFlightLimiter inFlightLimiter(GatewayProperties props) {
         return new InFlightLimiter(props.maxInFlight());
+    }
+
+    /** The gateway metrics of spec 12.2 (FR-ING-09), exported at /metrics. */
+    @Bean
+    GatewayMetrics gatewayMetrics(MeterRegistry registry, InFlightLimiter inFlight) {
+        return new GatewayMetrics(registry, inFlight);
     }
 
     @Bean

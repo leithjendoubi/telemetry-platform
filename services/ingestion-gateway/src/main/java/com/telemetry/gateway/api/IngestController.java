@@ -7,6 +7,7 @@ import com.telemetry.gateway.auth.Agent;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator.AuthResult;
 import com.telemetry.gateway.config.GatewayProperties;
+import com.telemetry.gateway.metrics.GatewayMetrics;
 import com.telemetry.gateway.publish.EventPublisher;
 import com.telemetry.gateway.ratelimit.AgentRateLimiter;
 import com.telemetry.gateway.ratelimit.AgentRateLimiter.Decision;
@@ -17,6 +18,7 @@ import com.telemetry.gateway.validation.ValidationOutcome;
 import com.telemetry.gateway.validation.ValidationOutcome.Checked;
 import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
 import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
+import io.micrometer.core.instrument.Timer;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
@@ -76,6 +78,7 @@ public class IngestController {
     private final ObjectMapper mapper;
     private final GatewayProperties props;
     private final Clock clock;
+    private final GatewayMetrics metrics;
 
     public IngestController(
             AgentRegistry registry,
@@ -85,7 +88,8 @@ public class IngestController {
             EventPublisher publisher,
             ObjectMapper mapper,
             GatewayProperties props,
-            Clock clock) {
+            Clock clock,
+            GatewayMetrics metrics) {
         this.registry = registry;
         this.rateLimiter = rateLimiter;
         this.inFlight = inFlight;
@@ -94,6 +98,7 @@ public class IngestController {
         this.mapper = mapper;
         this.props = props;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     /** The 202 body of spec 8.1. */
@@ -106,6 +111,7 @@ public class IngestController {
             if (!inFlight.tryAcquire()) {
                 // overload: answer at once, without reading the body (that would add load); a client that loses
                 // this answer sees a network error, which it retries like the 503 (spec 8.1)
+                metrics.overloaded();
                 return unavailable("Too many requests in progress, retry later", requestId);
             }
             // the slot is freed however the request ends: answer, error, or the client hanging up
@@ -131,8 +137,10 @@ public class IngestController {
                     case AuthResult.Authenticated ok ->
                         switch (rateLimiter.tryAcquire(ok.agent())) {
                             case Decision.Allowed allowed -> authenticated(request, ok.agent(), receivedAt, requestId);
-                            case Decision.Limited limited ->
-                                afterBody(request, tooManyRequests(limited.retryAfterSeconds(), requestId));
+                            case Decision.Limited limited -> {
+                                metrics.rateLimited();
+                                yield afterBody(request, tooManyRequests(limited.retryAfterSeconds(), requestId));
+                            }
                         };
                 })
                 .onErrorResume(RegistryUnavailable.class, e -> {
@@ -244,6 +252,7 @@ public class IngestController {
                 batchId, checked.accepted().size(), checked.rejections().size(), checked.rejections());
         // accepted and rejected events are published together; even a batch with nothing accepted
         // has its rejections recorded on telemetry.rejected.v1 before the 202 (AT-02)
+        Timer.Sample publishing = metrics.startPublish();
         return publisher
                 .publish(
                         checked.accepted(),
@@ -252,9 +261,13 @@ public class IngestController {
                         agent.agentId(),
                         batchId,
                         receivedAt)
-                .then(Mono.fromSupplier(() ->
-                        withRequestId(ResponseEntity.accepted(), requestId).body((Object) response)))
+                .then(Mono.fromSupplier(() -> {
+                    metrics.publishFinished(publishing, true);
+                    metrics.batchStored(checked.accepted().size(), checked.rejections());
+                    return withRequestId(ResponseEntity.accepted(), requestId).body((Object) response);
+                }))
                 .onErrorResume(e -> {
+                    metrics.publishFinished(publishing, false);
                     log.warn(
                             "batch {} of {}: Kafka did not acknowledge, answering 503: {}",
                             batchId,
