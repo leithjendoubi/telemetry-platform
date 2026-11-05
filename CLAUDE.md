@@ -19,7 +19,13 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
   yourself and show the result; never claim something works without having run it.
 - He works on **Windows with PowerShell**. Give PowerShell commands, not bash. `make` is not
   available; use the raw `docker compose` commands below.
-- Ask before big or irreversible decisions (new technology, changing the contract, deleting data).
+- Ask before big design decisions (new technology, changing the contract).
+- Commands: Leith lets you run them without asking, including ones that delete data or publish
+  (`docker compose down -v`, `smoke_test.py --clean`, `git push`). Afterwards, tell him what you ran and
+  what it changed, and name every command that deleted data or published something.
+- Blocked on purpose (`.claude/settings.local.json` deny list): discarding uncommitted work (`git reset --hard`,
+  `git clean`, `git checkout -- .`, `git restore`), force pushes, and any docker command on the Pi-hole container.
+  If one of these seems necessary, explain why to Leith instead of working around the block.
 
 ## Machine setup (verified 2026-10-14)
 - Windows, PowerShell, Docker Desktop (must show "Engine running" before docker commands).
@@ -64,8 +70,40 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
 - Step 5 smoke test: **done 2026-10-15.** `bench/scripts/smoke_test.py --clean`: 21/21 checks from empty volumes
   (42,000 accepted = raw = scored = rows, 0 duplicates, lag 0, API returns the points). Verified it fails (exit 1)
   when the detection container is stopped mid-run, and that the backlog drains after restart.
-- Still missing for G1 as the spec words it: the smoke test **in CI** (no CI pipeline exists yet).
+- Still missing for G1 as the spec words it: the smoke test **in CI**. A pipeline exists but is uncommitted
+  and has never run (see the handoff below).
 - Next: spec 16.2 week 5 (gateway hardening + observability baseline). Plan it with Leith first.
+
+**Handoff 2026-11-05 (audit done in a claude.ai chat; continue from here).**
+Uncommitted since commit 83d0844 (15 Oct): CI pipeline `.github/workflows/ci.yml` (spec 14.4 stages 1-6); root `pom.xml`
+(parent POM: versions + Spotless/Checkstyle/Failsafe/JaCoCo/Dependency-Check); `config/checkstyle`, `config/dependency-check`;
+integration tests renamed `*Test` -> `*IT` (run by Failsafe in `mvn verify`); ArchUnit `ArchitectureTest` in both Java
+services; `AgentCredential` (auth no longer imports config); import-linter contract and ruff/mypy settings in both Python
+projects; reformatting by Spotless/ruff. No behaviour change except: the simulator rejects non-http(s) URLs, and the smoke
+test only opens `http://localhost:` URLs. Simulator data logic unchanged (seed 42 gives the same data).
+- Verified on Windows 2026-11-05: `mvn spotless:check checkstyle:check` 0 violations; `mvn verify` from the root green
+  (gateway 33 unit + 30 IT, analytics 10 unit + 7 IT; coverage gateway 92.2 % lines / 85.9 % branches, analytics
+  94.7 % / 80.0 %); simulator pytest 56 passed + 1 expected skip, ruff/format/mypy clean; smoke script ruff/format/mypy
+  clean; detection ruff/format/mypy/lint-imports clean.
+- Detection pytest failed once (1 of 18, then coverage 79 %): `committed_total` in `tests/test_kafka_flow.py` crashed on
+  NOT_COORDINATOR from a broker started seconds earlier (CI stage 5 does exactly that). Fixed: coordinator-not-ready codes
+  now count as "not yet" and `wait_for` keeps polling. **Re-verified 2026-11-05**: 3 runs, each right after
+  `docker restart telemetry-kafka` + `up -d --wait kafka`: 18 passed, coverage 85.28 %. The same "-1" case was also guarded
+  in `test_output_refused_means_no_commit` (wait for a real answer before asserting 0); 4th run after a restart green;
+  ruff 0.16.9 (the pinned version), format, mypy, lint-imports clean.
+- Open items from the audit (fix before or during the first CI run):
+  1. No OpenAPI validation test, although `openapi-spec-validator` is a simulator dev dependency (spec 14.4 stage 1).
+  2. Dependency-Check runs only if the GitHub secret `NVD_API_KEY` exists; without it stage 3 is green without scanning Java.
+  3. `repo.root` = `${project.basedir}/../..` is right for the services but wrong for the root project, so the `aggregate`
+     scan's suppression file path points outside the repository.
+  4. Likely first-run CI failures: Gitleaks on the SHA-256 values in `dev-agents.yml`; Trivy findings in base images.
+     (The ruff version mismatch is settled: the detection venv has the pinned 0.16.9.)
+  5. The detection coverage gate needs the compose Kafka running (the Kafka tests cover the service loop).
+  6. No ADR yet for the CI pipeline and parent POM (rule 6): write ADR-0005.
+  7. No Git remote yet; only branch `main`.
+- Next: (done 2026-11-05: detection fix re-verified, this file and README's "Honest status" updated);
+  propose a commit split and **wait for Leith's OK** before committing; create the GitHub remote, push, get every CI
+  stage green; then plan spec 16.2 week 5 and **wait for approval** before coding it.
 
 Later stages follow spec 16.2 (week 5: gateway hardening; week 6: data foundation; weeks 9-13: detection and ML; ...).
 
@@ -84,21 +122,27 @@ docker compose -f infra/compose/docker-compose.yml --profile core down          
 docker exec telemetry-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:19092 --list
 docker exec -it telemetry-timescaledb psql -U postgres -d analytics_db
 
-# gateway (from services\ingestion-gateway\, JAVA_HOME set to JDK 21, Docker running for the tests)
-mvn test
+# both Java services at once (from this folder, JAVA_HOME set to JDK 21, Docker running for the *IT tests)
+mvn spotless:check checkstyle:check   # format + lint; mvn spotless:apply fixes formatting
+mvn test                              # unit + ArchUnit tests only (Surefire)
+mvn verify                            # + integration tests *IT (Failsafe, Testcontainers) + JaCoCo coverage gates
+
+# gateway (from services\ingestion-gateway\; mvn test / mvn verify work here too, for this service only)
 mvn package -DskipTests; & "$env:JAVA_HOME\bin\java" -jar target\ingestion-gateway-0.1.0.jar
 
-# detection stub (from services\detection-service\)
-.venv\Scripts\python -m pytest -v
+# detection stub (from services\detection-service\; the Kafka tests need the compose Kafka, else they skip
+# and the 80 % coverage gate fails)
+.venv\Scripts\python -m pytest -q
+.venv\Scripts\python -m ruff check .; .venv\Scripts\python -m ruff format --check .; .venv\Scripts\python -m mypy; .venv\Scripts\lint-imports
 .venv\Scripts\python -m detection_service
 
-# analytics (from services\analytics-service\, JAVA_HOME set to JDK 21, Docker running for the tests)
-mvn test
+# analytics (from services\analytics-service\)
 mvn package -DskipTests; & "$env:JAVA_HOME\bin\java" -jar target\analytics-service-0.1.0.jar
 curl.exe "http://localhost:8082/api/v1/analytics/instances/checkout-api-01/series?metric=cpuUsagePercent&from=2026-10-14T12:00:00Z&to=2026-10-14T15:00:00Z"
 
 # simulator (from simulator\)
-.venv\Scripts\python -m unittest discover -s tests -v
+.venv\Scripts\python -m pytest -q                    # what CI runs (56 passed, 1 expected skip)
+.venv\Scripts\python -m ruff check .; .venv\Scripts\python -m ruff format --check .; .venv\Scripts\python -m mypy
 .venv\Scripts\python -m fleet_sim describe
 .venv\Scripts\python -m fleet_sim live --speed 60 --duration 30     # needs the gateway (port 8081)
 ```
