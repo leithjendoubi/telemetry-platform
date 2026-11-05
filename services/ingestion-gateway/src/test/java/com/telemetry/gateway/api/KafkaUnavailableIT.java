@@ -1,11 +1,14 @@
 package com.telemetry.gateway.api;
 
+import com.telemetry.gateway.TestDatabase;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
@@ -22,6 +25,11 @@ import org.springframework.test.web.reactive.server.WebTestClient;
         })
 @AutoConfigureWebTestClient(timeout = "30s")
 class KafkaUnavailableIT {
+
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        TestDatabase.register(registry); // the agent check comes first and needs the registry
+    }
 
     @Autowired
     WebTestClient client;

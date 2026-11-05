@@ -101,11 +101,18 @@ services:
       - "${GATEWAY_PORT:-8081}:8081"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      # agent registry (spec 8.4): ingestion_db with the gateway's own role
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: "5432"
+      INGESTION_DB_USER: ${INGESTION_DB_USER:-ingestion}
+      INGESTION_DB_PASSWORD: ${INGESTION_DB_PASSWORD:-ingestion_dev_only}
     depends_on:
       kafka:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      timescaledb:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp

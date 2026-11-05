@@ -183,6 +183,13 @@ Progress:
 - A2 done 2026-11-05: `EventPublisher` (was RawEventPublisher) sends raw + rejected records together, 202 only when all
   are acknowledged (ADR-0007; a fully rejected batch now gets 503 while Kafka is down). Rejection messages capped at 1000
   chars. AT-02 integration test; `mvn verify` green (31 IT); planted bugs caught (rejections not published, wrong key).
+- A3 done 2026-11-05: table `agent` in `ingestion_db` (Flyway; dev seed `db/dev-seed/R__dev_agents.sql` replaces
+  `dev-agents.yml`), R2DBC lookup behind a 10 s Caffeine cache in package `registry`; 401 unknown, 403 revoked, 503 when
+  the database does not answer (ADR-0008). AT-03 integration tests; planted bugs caught (revoked passes, db down -> 401,
+  cache never expires). Live check with the simulator found that early answers (401/403) lost to "connection aborted"
+  (WinError 10053) because the gateway closed before the body arrived: fixed by draining the body first (socket test).
+  Note: the local broker had lost its topics (only `__consumer_offsets`); the gateway then answers 503 and logs
+  `UNKNOWN_TOPIC_OR_PARTITION`. Fix: run `kafka-init` (Commands).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)
 Goal (gate G1): **simulator -> gateway -> Kafka -> pass-through stub -> analytics writer ->

@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telemetry.gateway.auth.Agent;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator;
+import com.telemetry.gateway.auth.ApiKeyAuthenticator.AuthResult;
 import com.telemetry.gateway.config.GatewayProperties;
 import com.telemetry.gateway.publish.EventPublisher;
+import com.telemetry.gateway.registry.AgentRegistry;
 import com.telemetry.gateway.validation.BatchValidator;
 import com.telemetry.gateway.validation.ValidationOutcome;
 import com.telemetry.gateway.validation.ValidationOutcome.Checked;
@@ -14,6 +16,7 @@ import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
 import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
 import java.io.IOException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -36,7 +39,9 @@ import reactor.core.publisher.Mono;
  *
  * <p>Checks run in this order, the first failure decides the answer:
  * <pre>
- *  X-API-Key missing or unknown ............ 401
+ *  X-API-Key missing or unknown ............ 401   (agents: ingestion_db via AgentRegistry, 10 s cache)
+ *  X-API-Key of a revoked agent ............ 403
+ *  agent registry does not answer .......... 503 with Retry-After
  *  Content-Type not application/json ....... 415   (also Content-Encoding, until gzip arrives in week 5)
  *  body larger than 256 KiB ................ 413
  *  body is not JSON ........................ 400
@@ -54,8 +59,10 @@ public class IngestController {
 
     private static final Logger log = LoggerFactory.getLogger(IngestController.class);
     static final String REQUEST_ID = "X-Request-Id";
+    /** Longest wait for the rest of a body before an early answer (see {@link #afterBody}). */
+    static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(5);
 
-    private final ApiKeyAuthenticator authenticator;
+    private final AgentRegistry registry;
     private final BatchValidator validator;
     private final EventPublisher publisher;
     private final ObjectMapper mapper;
@@ -63,13 +70,13 @@ public class IngestController {
     private final Clock clock;
 
     public IngestController(
-            ApiKeyAuthenticator authenticator,
+            AgentRegistry registry,
             BatchValidator validator,
             EventPublisher publisher,
             ObjectMapper mapper,
             GatewayProperties props,
             Clock clock) {
-        this.authenticator = authenticator;
+        this.registry = registry;
         this.validator = validator;
         this.publisher = publisher;
         this.mapper = mapper;
@@ -83,26 +90,68 @@ public class IngestController {
     @PostMapping("/api/v1/telemetry/ingest")
     public Mono<ResponseEntity<Object>> ingest(ServerHttpRequest request) {
         Instant receivedAt = clock.instant();
-        HttpHeaders headers = request.getHeaders();
-        String requestId = headers.getFirst(REQUEST_ID);
+        String requestId = request.getHeaders().getFirst(REQUEST_ID);
 
-        Optional<Agent> agent = authenticator.authenticate(headers.getFirst("X-API-Key"));
-        if (agent.isEmpty()) {
-            return problem(HttpStatus.UNAUTHORIZED, "Missing or invalid API key", requestId);
+        Optional<String> keyHash =
+                ApiKeyAuthenticator.keyHash(request.getHeaders().getFirst("X-API-Key"));
+        if (keyHash.isEmpty()) {
+            return afterBody(request, problem(HttpStatus.UNAUTHORIZED, "Missing or invalid API key", requestId));
         }
+        return registry.findByKeyHash(keyHash.get())
+                .onErrorMap(RegistryUnavailable::new) // only the lookup's own failures mean "registry down"
+                .map(ApiKeyAuthenticator::decide)
+                .flatMap(result -> switch (result) {
+                    case AuthResult.Unknown unknown ->
+                        afterBody(request, problem(HttpStatus.UNAUTHORIZED, "Missing or invalid API key", requestId));
+                    case AuthResult.Revoked revoked ->
+                        afterBody(request, problem(HttpStatus.FORBIDDEN, "The API key has been revoked", requestId));
+                    case AuthResult.Authenticated ok -> authenticated(request, ok.agent(), receivedAt, requestId);
+                })
+                .onErrorResume(RegistryUnavailable.class, e -> {
+                    log.warn(
+                            "agent registry unavailable, answering 503: {}",
+                            e.getCause().toString());
+                    return afterBody(request, unavailable("The agent registry is unavailable, retry later", requestId));
+                });
+    }
+
+    /**
+     * Sends an answer that was decided before the body was needed (401, 403, 415, 503) only after the body has
+     * arrived, reading and dropping it. Otherwise the server closes the connection while the client is still sending,
+     * and the client loses the answer ("connection aborted", seen with the simulator on 2026-11-05: a revoked agent
+     * saw network errors and retried instead of stopping). Bounded like a normal read: at most maxBodyBytes and
+     * {@link #DRAIN_TIMEOUT}; after that the answer goes out anyway.
+     */
+    private Mono<ResponseEntity<Object>> afterBody(ServerHttpRequest request, Mono<ResponseEntity<Object>> answer) {
+        return DataBufferUtils.takeUntilByteCount(request.getBody(), props.maxBodyBytes())
+                .doOnNext(DataBufferUtils::release)
+                .then()
+                .timeout(DRAIN_TIMEOUT)
+                .onErrorResume(e -> Mono.empty())
+                .then(answer);
+    }
+
+    /** The checks after authentication; a registry failure must not be confused with an error in here. */
+    private Mono<ResponseEntity<Object>> authenticated(
+            ServerHttpRequest request, Agent agent, Instant receivedAt, String requestId) {
+        HttpHeaders headers = request.getHeaders();
         MediaType contentType = headers.getContentType();
         if (contentType == null || !MediaType.APPLICATION_JSON.equalsTypeAndSubtype(contentType)) {
-            return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json", requestId);
+            return afterBody(
+                    request,
+                    problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json", requestId));
         }
         String encoding = headers.getFirst(HttpHeaders.CONTENT_ENCODING);
         if (encoding != null && !encoding.equalsIgnoreCase("identity")) {
-            return problem(
-                    HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-                    "Content-Encoding " + encoding + " is not supported yet",
-                    requestId);
+            return afterBody(
+                    request,
+                    problem(
+                            HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                            "Content-Encoding " + encoding + " is not supported yet",
+                            requestId));
         }
         if (headers.getContentLength() > props.maxBodyBytes()) {
-            return tooLarge(requestId);
+            return tooLarge(requestId); // not drained: the body is announced as too large
         }
 
         // read at most maxBodyBytes; a longer body (e.g. chunked, no Content-Length) fails with
@@ -115,7 +164,7 @@ public class IngestController {
                     return bytes;
                 })
                 .defaultIfEmpty(new byte[0])
-                .flatMap(body -> handleBody(body, agent.get(), receivedAt, requestId))
+                .flatMap(body -> handleBody(body, agent, receivedAt, requestId))
                 .onErrorResume(DataBufferLimitException.class, e -> tooLarge(requestId));
     }
 
@@ -171,15 +220,26 @@ public class IngestController {
                             batchId,
                             agent.agentId(),
                             e.toString());
-                    ProblemDetail pd = ProblemDetail.forStatusAndDetail(
-                            HttpStatus.SERVICE_UNAVAILABLE, "The event store is unavailable, retry later");
-                    return Mono.just(withRequestId(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE), requestId)
-                            .header(
-                                    HttpHeaders.RETRY_AFTER,
-                                    Long.toString(props.retryAfter().toSeconds()))
-                            .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                            .body(pd));
+                    return unavailable("The event store is unavailable, retry later", requestId);
                 });
+    }
+
+    /** 503 with Retry-After (spec 8.1): the agent keeps the batch and sends it again later. */
+    private Mono<ResponseEntity<Object>> unavailable(String detail, String requestId) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, detail);
+        return Mono.just(withRequestId(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE), requestId)
+                .header(
+                        HttpHeaders.RETRY_AFTER,
+                        Long.toString(props.retryAfter().toSeconds()))
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(pd));
+    }
+
+    /** The agent registry (ingestion_db) could not answer; never treated as "unknown key". */
+    private static final class RegistryUnavailable extends RuntimeException {
+        RegistryUnavailable(Throwable cause) {
+            super(cause);
+        }
     }
 
     private Mono<ResponseEntity<Object>> tooLarge(String requestId) {

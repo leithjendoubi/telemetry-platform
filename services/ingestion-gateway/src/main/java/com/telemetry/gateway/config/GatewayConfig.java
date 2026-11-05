@@ -1,9 +1,10 @@
 package com.telemetry.gateway.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.telemetry.gateway.auth.AgentCredential;
-import com.telemetry.gateway.auth.ApiKeyAuthenticator;
+import com.github.benmanes.caffeine.cache.Ticker;
 import com.telemetry.gateway.publish.EventPublisher;
+import com.telemetry.gateway.registry.AgentRegistry;
+import com.telemetry.gateway.registry.R2dbcAgentLookup;
 import com.telemetry.gateway.validation.BatchValidator;
 import java.time.Clock;
 import java.util.HashMap;
@@ -14,6 +15,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 
@@ -26,11 +28,15 @@ public class GatewayConfig {
         return Clock.systemUTC();
     }
 
+    /** Agents from ingestion_db (R2DBC), behind a bounded 10 s cache (FR-ING-05, spec 8.4). */
     @Bean
-    ApiKeyAuthenticator apiKeyAuthenticator(GatewayProperties props) {
-        return new ApiKeyAuthenticator(props.agents().stream()
-                .map(a -> new AgentCredential(a.agentId(), a.apiKeySha256(), a.allowedServices()))
-                .toList());
+    AgentRegistry agentRegistry(DatabaseClient databaseClient, GatewayProperties props) {
+        GatewayProperties.Registry settings = props.registry();
+        return new AgentRegistry(
+                new R2dbcAgentLookup(databaseClient, settings.lookupTimeout()),
+                settings.cacheTtl(),
+                settings.cacheMaxSize(),
+                Ticker.systemTicker());
     }
 
     @Bean

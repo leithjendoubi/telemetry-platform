@@ -8,6 +8,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.JsonSchema;
 import com.telemetry.gateway.ContractFiles;
 import com.telemetry.gateway.ContractFiles.InvalidCase;
+import com.telemetry.gateway.TestDatabase;
+import com.telemetry.gateway.auth.ApiKeyAuthenticator;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,6 +41,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -68,8 +75,10 @@ class IngestControllerIT {
     static JsonSchema rejectedEventSchema;
 
     @DynamicPropertySource
-    static void kafkaProperties(DynamicPropertyRegistry registry) {
+    static void kafkaAndDatabaseProperties(DynamicPropertyRegistry registry) {
         registry.add("gateway.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        TestDatabase.register(registry);
+        registry.add("gateway.registry.cache-ttl", () -> "1s"); // so the revocation test need not wait 10 s
     }
 
     @BeforeAll
@@ -105,6 +114,9 @@ class IngestControllerIT {
 
     @Autowired
     WebTestClient client;
+
+    @LocalServerPort
+    int port;
 
     // ------------------------------------------------------------------ the happy path
 
@@ -322,18 +334,128 @@ class IngestControllerIT {
 
     // ------------------------------------------------------------------ whole-request failures
 
+    /**
+     * AT-03 (spec 13.6): missing, wrong and revoked API keys get 401/403 (spec 8.1: 401 missing or invalid, 403
+     * revoked) and nothing reaches Kafka. The batch holds a valid and an invalid event, so a skipped check would
+     * show on both topics.
+     */
     @Test
-    void missingOrWrongApiKeyIs401() {
+    void at03MissingWrongAndRevokedKeysPublishNothing() throws Exception {
+        String revokedKey = "test-key-" + UUID.randomUUID();
+        String revokedAgent = insertAgent(revokedKey, "REVOKED");
+        long rawBefore = recordsInTopic();
+        long rejectedBefore = recordsInTopic(REJECTED_TOPIC, 3);
+
         client.post()
                 .uri(URL)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(freshBatch(1).toString())
+                .bodyValue(halfValidBatchOf("agent-checkout-api").toString())
                 .exchange()
                 .expectStatus()
                 .isUnauthorized()
                 .expectHeader()
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON);
-        post(freshBatch(1), "dev-agent-nope").exchange().expectStatus().isUnauthorized();
+        post(halfValidBatchOf("agent-checkout-api"), "   ")
+                .exchange()
+                .expectStatus()
+                .isUnauthorized();
+        post(halfValidBatchOf("agent-checkout-api"), "dev-agent-nope")
+                .exchange()
+                .expectStatus()
+                .isUnauthorized();
+        // the hash of a key is not a key
+        post(halfValidBatchOf("agent-checkout-api"), ApiKeyAuthenticator.sha256Hex(KEY))
+                .exchange()
+                .expectStatus()
+                .isUnauthorized();
+        post(halfValidBatchOf(revokedAgent), revokedKey)
+                .exchange()
+                .expectStatus()
+                .isForbidden()
+                .expectBody()
+                .jsonPath("$.detail")
+                .isEqualTo("The API key has been revoked");
+
+        assertThat(recordsInTopic()).as("nothing on telemetry.raw.v1").isEqualTo(rawBefore);
+        assertThat(recordsInTopic(REJECTED_TOPIC, 3))
+                .as("nothing on telemetry.rejected.v1")
+                .isEqualTo(rejectedBefore);
+    }
+
+    /**
+     * An early answer (here 401, before the body is needed) must reach a client that is still sending its body.
+     * Found live on 2026-11-05: about half of such answers arrived as "connection reset", so a revoked agent saw a
+     * network error and retried instead of stopping. The race: the client (Python's urllib, i.e. the simulator) sends
+     * headers and body in two steps with "Connection: close"; the gateway answered from the headers and closed before
+     * the body arrived, and the late body made the client's system abort the connection (WinError 10053). A raw socket
+     * that pauses 500 ms between headers and body makes that race certain.
+     */
+    @Test
+    void earlyAnswerReachesAClientStillSendingItsBody() throws Exception {
+        byte[] body = halfValidBatchOf("agent-checkout-api").toString().getBytes(StandardCharsets.UTF_8);
+        byte[] head = ("POST " + URL + " HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"
+                        + "X-API-Key: dev-agent-nope\r\nConnection: close\r\n" // as Python's urllib sends it
+                        + "Content-Length: " + body.length + "\r\n\r\n")
+                .getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i < 3; i++) {
+            try (Socket socket = new Socket("localhost", port)) {
+                socket.setSoTimeout(10_000);
+                OutputStream out = socket.getOutputStream();
+                out.write(head);
+                out.flush();
+                Thread.sleep(500); // the network is slow, the body comes later
+                out.write(body);
+                out.flush();
+                String statusLine = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
+                        .readLine();
+                assertThat(statusLine).as("attempt " + i).startsWith("HTTP/1.1 401");
+            }
+        }
+    }
+
+    @Test
+    void revokingAnAgentTakesEffectWithinTheCacheTtl() throws Exception {
+        String key = "test-key-" + UUID.randomUUID();
+        String agentId = insertAgent(key, "ACTIVE");
+        ObjectNode batch = freshBatch(1);
+        ((ObjectNode) batch.get("agent")).put("agentId", agentId);
+        post(batch, key).exchange().expectStatus().isAccepted();
+
+        TestDatabase.update("UPDATE agent SET status = 'REVOKED' WHERE agent_id = ?", agentId);
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos(); // cache TTL is 1 s in this test
+        HttpStatus last = HttpStatus.ACCEPTED;
+        while (last != HttpStatus.FORBIDDEN && System.nanoTime() < deadline) {
+            Thread.sleep(200);
+            ObjectNode again = freshBatch(1);
+            ((ObjectNode) again.get("agent")).put("agentId", agentId);
+            last = HttpStatus.valueOf(post(again, key)
+                    .exchange()
+                    .returnResult(String.class)
+                    .getStatus()
+                    .value());
+        }
+        assertThat(last).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /** A new agent for checkout-api with the given key and status; returns its agentId. */
+    static String insertAgent(String apiKey, String status) {
+        String agentId = "agent-test-" + UUID.randomUUID().toString().substring(0, 8);
+        TestDatabase.update(
+                "INSERT INTO agent (agent_id, display_name, api_key_hash, allowed_services, status)"
+                        + " VALUES (?, 'test agent', ?, ARRAY['checkout-api'], ?)",
+                agentId,
+                ApiKeyAuthenticator.sha256Hex(apiKey),
+                status);
+        return agentId;
+    }
+
+    /** One valid and one invalid event, sent as {@code agentId}. */
+    static ObjectNode halfValidBatchOf(String agentId) {
+        ObjectNode batch = freshBatch(2);
+        ((ObjectNode) batch.get("agent")).put("agentId", agentId);
+        ((ObjectNode) batch.get("events").get(1).get("metrics")).put("cpuUsagePercent", 101);
+        return batch;
     }
 
     @Test

@@ -12,8 +12,9 @@ import com.tngtech.archunit.lang.ArchRule;
 /**
  * Architecture rules of the gateway (spec 7.4, 13.5: ArchUnit, zero violations).
  * <pre>
- *   api  ──▶ auth, validation, publish        (the HTTP adapter uses everything)
- *   publish ──▶ validation                    (the Kafka adapter sends accepted events)
+ *   api  ──▶ auth, validation, publish, registry   (the HTTP adapter uses everything)
+ *   publish ──▶ validation                    (the Kafka adapter sends accepted and rejected events)
+ *   registry ──▶ auth                         (the database adapter returns agents)
  *   auth, validation                          (pure rules: no Spring, no Kafka, no HTTP)
  *   config ──▶ everything                     (wiring only)
  * </pre>
@@ -40,7 +41,20 @@ class ArchitectureTest {
             .resideInAnyPackage("..gateway.auth..", "..gateway.validation..")
             .should()
             .dependOnClassesThat()
-            .resideInAnyPackage("..gateway.api..", "..gateway.publish..", "..gateway.config..");
+            .resideInAnyPackage("..gateway.api..", "..gateway.publish..", "..gateway.registry..", "..gateway.config..");
+
+    @ArchTest
+    static final ArchRule REGISTRY_DOES_NOT_KNOW_HTTP_OR_KAFKA = noClasses()
+            .that()
+            .resideInAPackage("..gateway.registry..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(
+                    "..gateway.api..",
+                    "..gateway.publish..",
+                    "org.springframework.web..",
+                    "org.springframework.http..",
+                    "org.apache.kafka..");
 
     @ArchTest
     static final ArchRule PUBLISHER_DOES_NOT_KNOW_HTTP = noClasses()

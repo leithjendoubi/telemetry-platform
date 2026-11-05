@@ -3,9 +3,19 @@ spring:
     name: ingestion-gateway
   lifecycle:
     timeout-per-shutdown-phase: 30s       # FR-ING-11: finish in-flight requests within 30 s on SIGTERM
-  config:
-    # Dev agents of the simulator (skeleton only; week 5 moves agents to ingestion_db).
-    import: "optional:classpath:dev-agents.yml"
+  # Agent registry in ingestion_db (spec 8.4), with the gateway's own role (database per service, rule 2).
+  # Requests read it through R2DBC (non-blocking, FR-ING-02) ...
+  r2dbc:
+    url: r2dbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/ingestion_db
+    username: ${INGESTION_DB_USER:ingestion}
+    password: ${INGESTION_DB_PASSWORD:ingestion_dev_only}   # local dev value from .env.example
+  # ... and Flyway creates the schema once at start-up over JDBC (ADR-0008).
+  flyway:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/ingestion_db
+    user: ${INGESTION_DB_USER:ingestion}
+    password: ${INGESTION_DB_PASSWORD:ingestion_dev_only}
+    # db/dev-seed inserts the 35 simulator agents with PUBLIC dev keys. Production: GATEWAY_DB_LOCATIONS=classpath:db/migration
+    locations: ${GATEWAY_DB_LOCATIONS:classpath:db/migration,classpath:db/dev-seed}
 
 server:
   port: 8081                              # 8080 is used by a Pi-hole on the dev machine
@@ -22,6 +32,10 @@ gateway:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     raw-topic: telemetry.raw.v1
     rejected-topic: telemetry.rejected.v1
+  registry:
+    cache-ttl: 10s                        # a revoked key stops working within 10 s (decided 2026-11-05)
+    cache-max-size: 10000
+    lookup-timeout: 2s
 
 # Probes at /health/live and /health/ready (spec 8.2). Prometheus /metrics comes with observability in week 5.
 management:

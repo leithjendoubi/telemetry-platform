@@ -19,6 +19,8 @@
         <checkstyle.skip>false</checkstyle.skip>
         <!-- shared contracts (spec 7.1): copied into the jar, never duplicated by hand -->
         <contracts.dir>${repo.root}/libs/telemetry-contracts</contracts.dir>
+        <!-- the real database init script, reused by the integration tests -->
+        <init-db.dir>${repo.root}/infra/compose/init-db</init-db.dir>
     </properties>
 
     <dependencies>
@@ -37,6 +39,40 @@
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
+        </dependency>
+
+        <!-- agent registry in ingestion_db (spec 8.4): non-blocking R2DBC at runtime (spec 6.5) ... -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-r2dbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- ... and Flyway over a JDBC connection used only at start-up to create the schema (ADR-0008) -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- bounded, time-limited cache of agent lookups -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
         </dependency>
 
         <dependency>
@@ -65,6 +101,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
@@ -88,6 +129,10 @@
             <testResource>
                 <directory>${contracts.dir}/examples</directory>
                 <targetPath>contracts/examples</targetPath>
+            </testResource>
+            <testResource>
+                <directory>${init-db.dir}</directory>
+                <targetPath>init-db</targetPath>
             </testResource>
         </testResources>
         <plugins>

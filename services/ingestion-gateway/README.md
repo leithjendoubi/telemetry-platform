@@ -30,13 +30,24 @@ and its README).
 
 Probes: `GET /health/live`, `GET /health/ready`.
 
-**Not yet (week 5 plan in CLAUDE.md):** agent registry in `ingestion_db` (A3), rate limits (A4), full sanitisation (A5),
+**Not yet (week 5 plan in CLAUDE.md):** rate limits (A4), full sanitisation (A5),
 BlockHound (A6), gzip (A7), Prometheus `/metrics` and OpenTelemetry `traceparent` (B1, B2), Kafka check in readiness.
 
-## API keys (skeleton)
+## API keys: the agent registry (ADR-0008)
 
-`src/main/resources/dev-agents.yml` holds the 35 simulator agents: agent `agent-<service>` has key
-`dev-agent-<service>` and may only send events for `<service>`. Only the SHA-256 of each key is stored.
+Agents live in table `agent` of `ingestion_db` (spec 8.4), read through R2DBC with a 10 s cache: missing or unknown key
+401, revoked key 403, database not answering 503. Flyway creates the table at start-up (`src/main/resources/db/migration`).
+In development, `db/dev-seed/R__dev_agents.sql` adds the 35 simulator agents: agent `agent-<service>` has key
+`dev-agent-<service>` and may only send events for `<service>`. Production leaves the seed out with
+`GATEWAY_DB_LOCATIONS=classpath:db/migration`. Only the SHA-256 of each key is stored.
+
+Revoke or re-activate an agent (takes effect within 10 s):
+
+```powershell
+docker exec telemetry-timescaledb psql -U ingestion -d ingestion_db -c "UPDATE agent SET status = 'REVOKED' WHERE agent_id = 'agent-cart-api';"
+docker exec telemetry-timescaledb psql -U ingestion -d ingestion_db -c "UPDATE agent SET status = 'ACTIVE' WHERE agent_id = 'agent-cart-api';"
+```
+
 To compute the hash of a new key in PowerShell:
 
 ```powershell
@@ -47,7 +58,8 @@ $k = "dev-agent-checkout-api"
 ## Build, test, run (PowerShell)
 
 Java 17 is still your default `java`, so point `JAVA_HOME` at Java 21 for this window first.
-The integration tests start their own Kafka in Docker, so Docker Desktop must be running.
+The integration tests start their own Kafka and TimescaleDB in Docker, so Docker Desktop must be running.
+To run the jar on the host, Kafka and TimescaleDB from infra/compose must be running (it connects to `ingestion_db`).
 
 ```powershell
 cd services\ingestion-gateway
@@ -70,11 +82,14 @@ Settings can be changed with environment variables, e.g. `KAFKA_BOOTSTRAP_SERVER
 | Test class | What it proves |
 |-----------|----------------|
 | `BatchValidatorTest` | every case of `invalid-cases.json` gets its expected code; duplicates, allow-list, partial acceptance, exact window edges, uuid/date-time formats |
-| `ApiKeyAuthenticatorTest` | keys are matched by SHA-256; bad configuration stops start-up |
+| `ApiKeyAuthenticatorTest` | the 401 / 403 / pass decision; keys are hashed with SHA-256; a blank key is never looked up |
+| `AgentRegistryTest` | the cache: answers reused for 10 s (also "unknown"), a revocation seen after that, failures not cached, one shared lookup per key |
 | `RejectedEventContractTest` | the `RejectionCode` enum equals the codes of `telemetry-rejected-event.1.0.json`; the Java validator accepts its example |
 | `RejectionTest` | rejection messages are capped at 1000 characters without splitting a character |
 | `ArchitectureTest` | package rules (ArchUnit), including the guard of ADR-0006 |
 | `IngestControllerIT` | the whole service over HTTP with a real Kafka (Testcontainers): every invalid case again, status codes, record key/value/headers, records match their contract schemas, **AT-02** (mixed batch: raw, 202 body and rejected topic agree) |
+| `IngestControllerIT` (AT-03) | missing, wrong and revoked keys get 401/403 and publish nothing; a revocation takes effect within the cache time |
 | `KafkaUnavailableIT` | Kafka down gives 503 + `Retry-After`, never 202 |
+| `RegistryUnavailableIT` | database down gives 503 + `Retry-After`, never 401 |
 
 Testcontainers must be 1.21.4 or newer (1.21.3 cannot talk to Docker Engine 29); Spring Boot 3.5.16 manages 1.21.4.
