@@ -201,6 +201,12 @@ Progress:
   (WinError 10053) because the gateway closed before the body arrived: fixed by draining the body first (socket test).
   Note: the local broker had lost its topics (only `__consumer_offsets`); the gateway then answers 503 and logs
   `UNKNOWN_TOPIC_OR_PARTITION`. Fix: run `kafka-init` (Commands).
+- A4 started 2026-11-05: simulator now treats Retry-After as a minimum (jitter used to shorten it to as little as
+  half; test proves it). NOT done yet: Bucket4j per-agent bucket from `agent.rate_limit_rps`/`burst` -> 429 +
+  Retry-After; global in-flight limit **2,000** (spec 6.8 line "Max in-flight requests") -> 503 + Retry-After
+  (drain the body like other early answers); AT-04 integration test; in-flight test via a socket that holds a request.
+  Open point for later: spec 6.8 says producer timeout 2 s, the gateway uses delivery.timeout.ms 10 s.
+- Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)
 Goal (gate G1): **simulator -> gateway -> Kafka -> pass-through stub -> analytics writer ->

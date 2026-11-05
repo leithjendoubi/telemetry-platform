@@ -17,8 +17,15 @@ from fleet_sim.model import FleetModel
 class FakeGateway:
     """Records every request. Can answer the first N requests (or all of them) with an error status."""
 
-    def __init__(self, fail_first: int = 0, fail_status: int = 429, always_status: int | None = None):
+    def __init__(
+        self,
+        fail_first: int = 0,
+        fail_status: int = 429,
+        always_status: int | None = None,
+        retry_after: str = "0",
+    ):
         self.requests: list[dict] = []
+        self.retry_after = retry_after
         self.fail_remaining = fail_first
         self.fail_status = fail_status
         self.always_status = always_status
@@ -44,7 +51,7 @@ class FakeGateway:
                 if status:
                     self.send_response(status)
                     self.send_header("Content-Type", "application/problem+json")
-                    self.send_header("Retry-After", "0")
+                    self.send_header("Retry-After", gateway.retry_after)
                     payload = json.dumps({"title": "error", "status": status}).encode()
                 else:
                     doc = json.loads(body)
@@ -146,6 +153,21 @@ class LiveModeTests(unittest.TestCase):
                 self.assertEqual(stats.batches_sent, 30)  # nothing lost
                 self.assertEqual(stats.failed_batches, 0)
                 self.assertEqual(len(gw.requests), 33)  # 30 batches + 3 retried attempts
+
+    def test_retry_after_is_a_minimum_jitter_never_shortens_it(self):
+        waits: list[float] = []
+
+        def sleep(seconds: float) -> None:
+            waits.append(seconds)
+            if seconds < 1:  # the runner's own pacing really waits; the long retry waits are only recorded
+                time.sleep(seconds)
+
+        with FakeGateway(fail_first=6, fail_status=429, retry_after="7") as gw:
+            stats = make_runner(gw.url, sleep=sleep).run()
+        retry_waits = [w for w in waits if w >= 1]
+        self.assertEqual(stats.retries, 6)
+        self.assertEqual(len(retry_waits), 6)
+        self.assertTrue(all(w >= 7 for w in retry_waits), retry_waits)
 
     def test_does_not_retry_permanent_errors(self):
         with FakeGateway(always_status=401) as gw:

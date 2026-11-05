@@ -174,9 +174,10 @@ class LiveRunner:
                 if attempt > self.max_retries:
                     self.stats.add(failed_batches=1)
                     return
-                delay = max(retry_after or 0.0, self.backoff_base * 2 ** (attempt - 1))
+                # jitter spreads the backoff only; Retry-After is a minimum the agent must respect (spec 8.1)
+                backoff = self.backoff_base * 2 ** (attempt - 1) * self._rng.uniform(0.5, 1.5)
                 self.stats.add(retries=1)
-                self.sleep(delay * self._rng.uniform(0.5, 1.5))  # jitter
+                self.sleep(max(retry_after or 0.0, backoff))
                 continue
             # 400, 401, 403, 413, 415, 422 ...: retrying cannot help
             self.stats.add(failed_batches=1)
