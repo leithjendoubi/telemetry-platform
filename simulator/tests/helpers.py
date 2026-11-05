@@ -21,6 +21,7 @@ RAW_EVENT_SCHEMA_PATH = CONTRACTS / "schemas" / "telemetry-raw-event.1.0.json"
 RAW_EVENT_EXAMPLE = CONTRACTS / "examples" / "raw-event.json"
 SCORED_EVENT_SCHEMA_PATH = CONTRACTS / "schemas" / "telemetry-scored-event.1.0.json"
 SCORED_EVENT_EXAMPLE = CONTRACTS / "examples" / "scored-event.json"
+ANALYTICS_OPENAPI_PATH = CONTRACTS / "openapi" / "analytics-api.yaml"
 DEFAULT_CONFIG = SIM_DIR / "configs" / "default.yaml"
 
 ISO_MS = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")

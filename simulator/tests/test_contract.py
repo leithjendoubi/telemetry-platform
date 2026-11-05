@@ -151,5 +151,38 @@ class ScoredEventContractTests(unittest.TestCase):
         self.assertEqual(scored["$defs"], raw["$defs"])
 
 
+class AnalyticsOpenApiContractTests(unittest.TestCase):
+    """The query API contract (spec 8.2) must be valid OpenAPI 3.1 (spec 14.4 stage 1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        from openapi_spec_validator.readers import read_from_filename
+
+        cls.spec, _ = read_from_filename(str(helpers.ANALYTICS_OPENAPI_PATH))
+
+    def test_document_is_valid_openapi_3_1(self):
+        from openapi_spec_validator import OpenAPIV31SpecValidator
+
+        errors = list(OpenAPIV31SpecValidator(self.spec).iter_errors())
+        self.assertEqual([e.message for e in errors], [])
+
+    def test_validator_rejects_a_broken_document(self):
+        from openapi_spec_validator import OpenAPIV31SpecValidator
+
+        broken = json.loads(json.dumps(self.spec))
+        del broken["info"]  # required by OpenAPI 3.1
+        self.assertTrue(list(OpenAPIV31SpecValidator(broken).iter_errors()))
+        broken = json.loads(json.dumps(self.spec))
+        broken["components"]["schemas"]["Series"]["required"] = "points"  # must be an array
+        self.assertTrue(list(OpenAPIV31SpecValidator(broken).iter_errors()))
+
+    def test_metric_names_are_those_of_the_ingest_contract(self):
+        batch = helpers.load_json(helpers.SCHEMA_PATH)
+        ingest_metrics = set(batch["$defs"]["event"]["properties"]["metrics"]["properties"])
+        params = self.spec["paths"]["/api/v1/analytics/instances/{instanceId}/series"]["get"]["parameters"]
+        metric = next(p for p in params if p["name"] == "metric")
+        self.assertEqual(set(metric["schema"]["enum"]), ingest_metrics)
+
+
 if __name__ == "__main__":
     unittest.main()
