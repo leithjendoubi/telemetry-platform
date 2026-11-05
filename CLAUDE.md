@@ -70,42 +70,29 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
 - Step 5 smoke test: **done 2026-10-15.** `bench/scripts/smoke_test.py --clean`: 21/21 checks from empty volumes
   (42,000 accepted = raw = scored = rows, 0 duplicates, lag 0, API returns the points). Verified it fails (exit 1)
   when the detection container is stopped mid-run, and that the backlog drains after restart.
-- Still missing for G1 as the spec words it: the smoke test **in CI**. A pipeline exists but is uncommitted
-  and has never run (see the handoff below).
+- **Gate G1 complete 2026-11-05: the smoke test runs in CI.** GitHub Actions run 42021118733, all 6 stages green
+  (21/21 smoke checks, 42,000 sent = accepted = rows = distinct eventIds).
 - Next: spec 16.2 week 5 (gateway hardening + observability baseline). Plan it with Leith first.
 
-**Handoff 2026-11-05 (audit done in a claude.ai chat; continue from here).**
-Uncommitted since commit 83d0844 (15 Oct): CI pipeline `.github/workflows/ci.yml` (spec 14.4 stages 1-6); root `pom.xml`
-(parent POM: versions + Spotless/Checkstyle/Failsafe/JaCoCo/Dependency-Check); `config/checkstyle`, `config/dependency-check`;
-integration tests renamed `*Test` -> `*IT` (run by Failsafe in `mvn verify`); ArchUnit `ArchitectureTest` in both Java
-services; `AgentCredential` (auth no longer imports config); import-linter contract and ruff/mypy settings in both Python
-projects; reformatting by Spotless/ruff. No behaviour change except: the simulator rejects non-http(s) URLs, and the smoke
-test only opens `http://localhost:` URLs. Simulator data logic unchanged (seed 42 gives the same data).
-- Verified on Windows 2026-11-05: `mvn spotless:check checkstyle:check` 0 violations; `mvn verify` from the root green
-  (gateway 33 unit + 30 IT, analytics 10 unit + 7 IT; coverage gateway 92.2 % lines / 85.9 % branches, analytics
-  94.7 % / 80.0 %); simulator pytest 56 passed + 1 expected skip, ruff/format/mypy clean; smoke script ruff/format/mypy
-  clean; detection ruff/format/mypy/lint-imports clean.
-- Detection pytest failed once (1 of 18, then coverage 79 %): `committed_total` in `tests/test_kafka_flow.py` crashed on
-  NOT_COORDINATOR from a broker started seconds earlier (CI stage 5 does exactly that). Fixed: coordinator-not-ready codes
-  now count as "not yet" and `wait_for` keeps polling. **Re-verified 2026-11-05**: 3 runs, each right after
-  `docker restart telemetry-kafka` + `up -d --wait kafka`: 18 passed, coverage 85.28 %. The same "-1" case was also guarded
-  in `test_output_refused_means_no_commit` (wait for a real answer before asserting 0); 4th run after a restart green;
-  ruff 0.16.9 (the pinned version), format, mypy, lint-imports clean.
-- Open items from the audit (fix before or during the first CI run):
-  1. No OpenAPI validation test, although `openapi-spec-validator` is a simulator dev dependency (spec 14.4 stage 1).
-  2. Dependency-Check runs only if the GitHub secret `NVD_API_KEY` exists; without it stage 3 is green without scanning Java.
-  3. `repo.root` = `${project.basedir}/../..` is right for the services but wrong for the root project, so the `aggregate`
-     scan's suppression file path points outside the repository.
-  4. Likely first-run CI failures: Trivy findings in base images. Settled: the ruff mismatch (venv has the pinned
-     0.16.9); Gitleaks (35 hits = the SHA-256 of the public dev keys, checked; `.gitleaks.toml` excuses only 64-hex values
-     in `dev-agents.yml` for the generic-api-key rule; planted GitHub token and non-hex key in that file still caught).
-  5. The detection coverage gate needs the compose Kafka running (the Kafka tests cover the service loop).
-  6. No ADR yet for the CI pipeline and parent POM (rule 6): write ADR-0005.
-  7. No Git remote yet; only branch `main`.
-- Next: (done 2026-11-05: detection fix re-verified, this file and README's "Honest status" updated);
-  propose a commit split and **wait for Leith's OK** before committing; create the GitHub remote, push, get every CI
-  stage green; then plan spec 16.2 week 5 and **wait for approval** before coding it.
-
+**CI and repository (since 2026-11-05).** Public repo https://github.com/leithjendoubi/telemetry-platform, branch `main`.
+`gh` CLI at `C:\Program Files\GitHub CLI\gh.exe` (logged in as leithjendoubi, scopes incl. `workflow`); commits use the
+noreply address `115526801+leithjendoubi@users.noreply.github.com` (set in this repo's git config). Every push runs CI:
+`& "C:\Program Files\GitHub CLI\gh.exe" run list`, `... run view <id> --log-failed`.
+- Pipeline `.github/workflows/ci.yml` (spec 14.4 stages 1-6, ADR-0005); root `pom.xml` = parent POM (Spring Boot
+  **3.5.16** + security patch pins, quality plugins); unit tests `*Test` (`mvn test`), integration tests `*IT` (`mvn verify`).
+- Security exceptions, each narrow and checked with planted cases: `.gitleaks.toml` (SHA-256 of the public dev keys);
+  `.trivyignore.yaml` (3 CRITICAL Spring 6.2 CVEs fixed only in Spring 7, **expire 2026-12-31**, guarded by the ArchUnit
+  rule `NO_SPRING_FEATURES_OF_ACCEPTED_CVES`; ADR-0006). Semgrep and pip-audit run isolated with pipx; pip-audit audits
+  each project's declared dependencies.
+- Open:
+  1. OWASP Dependency-Check is skipped until Leith adds the GitHub secret `NVD_API_KEY` (free key from NVD).
+  2. Before 2026-12-31: ask the supervisor about Spring Boot 4 (spec 6.5 says Boot 3), or renew ADR-0006.
+  3. Remove the `apt` upgrade line in both Java Dockerfiles once a newer `eclipse-temurin` tag contains the fix, and
+     each patch pin in `pom.xml` once Spring Boot manages that version.
+- Windows notes: Git for Windows has `core.autocrlf=true`; `.gitattributes` forces LF. Files checked out before that
+  may still be CRLF on disk (Spotless then fails): `git ls-files --eol | Select-String w/crlf` finds them.
+  PowerShell 5.1 garbles `"` inside arguments to git (use `git commit -F <file>`) and splits unquoted `-Dx.y=z`
+  arguments at the dot (quote them).
 Later stages follow spec 16.2 (week 5: gateway hardening; week 6: data foundation; weeks 9-13: detection and ML; ...).
 
 ## Commands (PowerShell, from this folder)
@@ -142,7 +129,7 @@ mvn package -DskipTests; & "$env:JAVA_HOME\bin\java" -jar target\analytics-servi
 curl.exe "http://localhost:8082/api/v1/analytics/instances/checkout-api-01/series?metric=cpuUsagePercent&from=2026-10-14T12:00:00Z&to=2026-10-14T15:00:00Z"
 
 # simulator (from simulator\)
-.venv\Scripts\python -m pytest -q                    # what CI runs (56 passed, 1 expected skip)
+.venv\Scripts\python -m pytest -q                    # what CI runs (59 passed, 1 expected skip)
 .venv\Scripts\python -m ruff check .; .venv\Scripts\python -m ruff format --check .; .venv\Scripts\python -m mypy
 .venv\Scripts\python -m fleet_sim describe
 .venv\Scripts\python -m fleet_sim live --speed 60 --duration 30     # needs the gateway (port 8081)
