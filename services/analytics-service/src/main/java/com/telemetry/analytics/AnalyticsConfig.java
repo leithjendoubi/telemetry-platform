@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telemetry.analytics.ingest.ScoredEventListener;
 import com.telemetry.analytics.ingest.ScoredEventParser;
 import com.telemetry.analytics.ingest.TelemetryEventWriter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,8 +23,8 @@ public class AnalyticsConfig {
     }
 
     @Bean
-    TelemetryEventWriter telemetryEventWriter(JdbcTemplate jdbc, TransactionTemplate tx) {
-        return new TelemetryEventWriter(jdbc, tx);
+    TelemetryEventWriter telemetryEventWriter(JdbcTemplate jdbc, TransactionTemplate tx, MeterRegistry registry) {
+        return new TelemetryEventWriter(jdbc, tx, registry);
     }
 
     @Bean

@@ -3,6 +3,7 @@ package com.telemetry.analytics;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.telemetry.analytics.ingest.ScoredEventParserTest;
 import java.sql.Connection;
@@ -37,8 +38,12 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -57,6 +62,8 @@ import org.testcontainers.utility.MountableFile;
  * service connects exactly like in compose: database analytics_db, role analytics, extension pre-installed.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureObservability // Spring Boot turns metrics export off in tests unless asked; /metrics is tested here
+@ExtendWith(OutputCaptureExtension.class)
 @Testcontainers
 class AnalyticsIT {
 
@@ -163,7 +170,7 @@ class AnalyticsIT {
     // ------------------------------------------------------------------ writing
 
     @Test
-    void scoredEventsAreStoredOnceAndPoisonGoesToTheDlq() throws Exception {
+    void scoredEventsAreStoredOnceAndPoisonGoesToTheDlq(CapturedOutput output) throws Exception {
         String instance = "writer-" + UUID.randomUUID().toString().substring(0, 8);
         List<ObjectNode> events = new ArrayList<>();
         for (int i = 0; i < 50; i++) {
@@ -215,6 +222,17 @@ class AnalyticsIT {
         assertThat(new String(
                         dead.get(0).headers().lastHeader("dlq-source-topic").value()))
                 .isEqualTo(TOPIC);
+
+        // spec 12.1: the poison record's WARN is a JSON line with service and version (ECS)
+        String warn = output.getOut()
+                .lines()
+                .filter(l -> l.contains("poison record"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no WARN line for the poison record"));
+        JsonNode json = new ObjectMapper().readTree(warn);
+        assertThat(json.at("/log/level").asText()).isEqualTo("WARN");
+        assertThat(json.at("/service/name").asText()).isEqualTo("analytics-service");
+        assertThat(json.at("/service/version").asText()).isEqualTo("0.1.0");
     }
 
     @Test
@@ -241,6 +259,60 @@ class AnalyticsIT {
                 .as("the retried batch arrives once the table is back")
                 .isTrue();
         assertThat(waitFor(this::allCommitted, 30)).isTrue();
+    }
+
+    // ------------------------------------------------------------------ observability
+
+    /** Spec 12.2: rows inserted, replays skipped, batch duration, query latency, consumer lag at /metrics. */
+    @Test
+    void metricsCountRowsDuplicatesAndQueries() throws Exception {
+        double insertedBefore = metric("analytics_rows_inserted_total", "");
+        double duplicatesBefore = metric("analytics_rows_duplicate_total", "");
+        double queriesBefore = metric("analytics_query_seconds_count", "query=\"instance_series\"");
+
+        String instance = "metrics-" + UUID.randomUUID().toString().substring(0, 8);
+        List<ObjectNode> events = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            events.add(scored(instance, Instant.now().minusSeconds(600 - i * 10L)));
+        }
+        events.forEach(this::send);
+        producer.flush();
+        assertThat(waitFor(() -> rows(instance) == 20, 30)).isTrue();
+        events.subList(0, 5).forEach(this::send); // replays, skipped by ON CONFLICT DO NOTHING
+        producer.flush(); // no poison here: the DLQ test counts the DLQ exactly
+        assertThat(waitFor(() -> metric("analytics_rows_duplicate_total", "") - duplicatesBefore >= 5, 30))
+                .isTrue();
+        http.getForEntity(
+                "/api/v1/analytics/instances/{id}/series?metric=cpuUsagePercent&from={from}&to={to}",
+                JsonNode.class,
+                instance,
+                Instant.now().minusSeconds(3600).toString(),
+                Instant.now().toString());
+
+        assertThat(metric("analytics_rows_inserted_total", "") - insertedBefore).isEqualTo(20.0);
+        assertThat(metric("analytics_rows_duplicate_total", "") - duplicatesBefore)
+                .isEqualTo(5.0);
+        assertThat(metric("analytics_query_seconds_count", "query=\"instance_series\"") - queriesBefore)
+                .isEqualTo(1.0);
+        assertThat(metricsText())
+                .contains("analytics_insert_batch_seconds_count{outcome=\"success\",service=\"analytics-service\"}")
+                .contains("kafka_consumer_fetch_manager_records_lag_max"); // consumer lag (spec 12.2)
+    }
+
+    String metricsText() {
+        ResponseEntity<String> response = http.getForEntity("/metrics", String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        return response.getBody();
+    }
+
+    /** The value of the one series of {@code name} whose labels contain {@code label} (0 if absent). */
+    double metric(String name, String label) {
+        for (String line : metricsText().split("\n")) {
+            if (line.startsWith(name + "{") && line.contains(label)) {
+                return Double.parseDouble(line.substring(line.lastIndexOf(' ') + 1));
+            }
+        }
+        return 0;
     }
 
     // ------------------------------------------------------------------ query endpoint

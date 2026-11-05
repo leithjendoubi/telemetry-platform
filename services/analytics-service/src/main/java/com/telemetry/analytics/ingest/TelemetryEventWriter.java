@@ -1,5 +1,8 @@
 package com.telemetry.analytics.ingest;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.Arrays;
@@ -12,6 +15,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Batch-inserts rows into telemetry_event in ONE transaction (FR-ANA-01).
  * {@code ON CONFLICT DO NOTHING} makes a replayed event harmless: the primary key
  * (instance_id, event_time, event_id) already exists, so the second copy is skipped.
+ *
+ * <p>Metrics (spec 12.2, at /metrics): analytics_rows_inserted_total, analytics_rows_duplicate_total (replays
+ * skipped by ON CONFLICT), analytics_insert_batch_seconds{outcome}.
  */
 public class TelemetryEventWriter {
 
@@ -27,10 +33,29 @@ public class TelemetryEventWriter {
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
+    private final Counter inserted;
+    private final Counter duplicates;
+    private final Timer batchOk;
+    private final Timer batchFailed;
 
-    public TelemetryEventWriter(JdbcTemplate jdbc, TransactionTemplate tx) {
+    public TelemetryEventWriter(JdbcTemplate jdbc, TransactionTemplate tx, MeterRegistry registry) {
         this.jdbc = jdbc;
         this.tx = tx;
+        this.inserted = Counter.builder("analytics.rows.inserted")
+                .description("New rows written to telemetry_event")
+                .register(registry);
+        this.duplicates = Counter.builder("analytics.rows.duplicate")
+                .description("Rows skipped by ON CONFLICT DO NOTHING (replayed events)")
+                .register(registry);
+        this.batchOk = batchTimer(registry, "success");
+        this.batchFailed = batchTimer(registry, "failure");
+    }
+
+    private static Timer batchTimer(MeterRegistry registry, String outcome) {
+        return Timer.builder("analytics.insert.batch")
+                .description("Duration of one batch insert transaction")
+                .tag("outcome", outcome)
+                .register(registry);
     }
 
     /** Returns how many rows were new; the rest were duplicates. Throws if the database fails (nothing is stored then). */
@@ -38,6 +63,21 @@ public class TelemetryEventWriter {
         if (rows.isEmpty()) {
             return 0;
         }
+        Timer.Sample sample = Timer.start();
+        int written;
+        try {
+            written = insert(rows);
+        } catch (RuntimeException e) {
+            sample.stop(batchFailed);
+            throw e;
+        }
+        sample.stop(batchOk);
+        inserted.increment(written);
+        duplicates.increment(rows.size() - written);
+        return written;
+    }
+
+    private int insert(List<TelemetryRow> rows) {
         int[] counts = tx.execute(status -> jdbc.batchUpdate(INSERT, new BatchPreparedStatementSetter() {
             @Override
             public void setValues(PreparedStatement ps, int i) throws SQLException {

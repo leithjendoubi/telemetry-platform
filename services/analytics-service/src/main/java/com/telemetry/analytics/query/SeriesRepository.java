@@ -1,5 +1,7 @@
 package com.telemetry.analytics.query;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -32,9 +34,15 @@ public class SeriesRepository {
     public record Point(Instant time, double value, double anomalyProb, boolean isAnomaly) {}
 
     private final JdbcTemplate jdbc;
+    private final Timer instanceSeriesTimer;
 
-    public SeriesRepository(JdbcTemplate jdbc) {
+    public SeriesRepository(JdbcTemplate jdbc, MeterRegistry registry) {
         this.jdbc = jdbc;
+        // spec 12.2: "query latency by named query" -> analytics_query_seconds{query="instance_series"}
+        this.instanceSeriesTimer = Timer.builder("analytics.query")
+                .description("Database time of a named query")
+                .tag("query", "instance_series")
+                .register(registry);
     }
 
     /** Points of [from, to) in time order, at most {@code limit}. Uses the primary key (instance_id, event_time, ...). */
@@ -45,13 +53,13 @@ public class SeriesRepository {
         }
         String sql = "SELECT event_time, " + column + " AS value, anomaly_prob, is_anomaly FROM telemetry_event"
                 + " WHERE instance_id = ? AND event_time >= ? AND event_time < ? ORDER BY event_time LIMIT ?";
-        return jdbc.query(
+        return instanceSeriesTimer.record(() -> jdbc.query(
                 sql,
                 (rs, i) ->
                         new Point(rs.getTimestamp(1).toInstant(), rs.getDouble(2), rs.getDouble(3), rs.getBoolean(4)),
                 instanceId,
                 Timestamp.from(from),
                 Timestamp.from(to),
-                limit);
+                limit));
     }
 }
