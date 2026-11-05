@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telemetry.gateway.auth.Agent;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator;
 import com.telemetry.gateway.config.GatewayProperties;
-import com.telemetry.gateway.publish.RawEventPublisher;
+import com.telemetry.gateway.publish.EventPublisher;
 import com.telemetry.gateway.validation.BatchValidator;
 import com.telemetry.gateway.validation.ValidationOutcome;
 import com.telemetry.gateway.validation.ValidationOutcome.Checked;
@@ -43,7 +43,8 @@ import reactor.core.publisher.Mono;
  *  more than 100 events .................... 413
  *  envelope breaks the schema .............. 400
  *  agent.agentId is not the key's agent .... 403
- *  events checked one by one, valid ones published to Kafka, then 202 with accepted/rejected counts
+ *  events checked one by one; valid ones published to telemetry.raw.v1, invalid ones to telemetry.rejected.v1,
+ *  then 202 with accepted/rejected counts
  *  Kafka does not acknowledge in time ...... 503 with Retry-After
  * </pre>
  * Errors use RFC 9457 problem details (application/problem+json).
@@ -56,7 +57,7 @@ public class IngestController {
 
     private final ApiKeyAuthenticator authenticator;
     private final BatchValidator validator;
-    private final RawEventPublisher publisher;
+    private final EventPublisher publisher;
     private final ObjectMapper mapper;
     private final GatewayProperties props;
     private final Clock clock;
@@ -64,7 +65,7 @@ public class IngestController {
     public IngestController(
             ApiKeyAuthenticator authenticator,
             BatchValidator validator,
-            RawEventPublisher publisher,
+            EventPublisher publisher,
             ObjectMapper mapper,
             GatewayProperties props,
             Clock clock) {
@@ -152,11 +153,16 @@ public class IngestController {
         String batchId = batch.get("batchId").asText();
         IngestResponse response = new IngestResponse(
                 batchId, checked.accepted().size(), checked.rejections().size(), checked.rejections());
-        if (checked.accepted().isEmpty()) {
-            return Mono.just(withRequestId(ResponseEntity.accepted(), requestId).body(response));
-        }
+        // accepted and rejected events are published together; even a batch with nothing accepted
+        // has its rejections recorded on telemetry.rejected.v1 before the 202 (AT-02)
         return publisher
-                .publish(checked.accepted(), agent.agentId(), batchId, receivedAt)
+                .publish(
+                        checked.accepted(),
+                        checked.rejections(),
+                        batch.get("events"),
+                        agent.agentId(),
+                        batchId,
+                        receivedAt)
                 .then(Mono.fromSupplier(() ->
                         withRequestId(ResponseEntity.accepted(), requestId).body((Object) response)))
                 .onErrorResume(e -> {

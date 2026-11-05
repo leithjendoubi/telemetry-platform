@@ -6,12 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SchemaValidatorsConfig;
-import com.networknt.schema.SpecVersion;
 import com.telemetry.gateway.ContractFiles;
 import com.telemetry.gateway.ContractFiles.InvalidCase;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,7 +46,7 @@ import org.testcontainers.kafka.KafkaContainer;
 
 /**
  * The whole gateway over HTTP, publishing to a real Kafka broker in Docker (Testcontainers).
- * The topic is created by the test, with the 12 partitions of create-topics.sh, because the
+ * The topics are created by the test, with the partitions of create-topics.sh, because the
  * real broker has auto-creation switched off.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -60,13 +56,16 @@ class IngestControllerIT {
 
     static final String URL = "/api/v1/telemetry/ingest";
     static final String TOPIC = "telemetry.raw.v1";
+    static final String REJECTED_TOPIC = "telemetry.rejected.v1";
     static final String KEY = "dev-agent-checkout-api"; // simulator dev key of agent-checkout-api
 
     @Container
     static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.8.1");
 
     static KafkaConsumer<String, byte[]> consumer;
+    static KafkaConsumer<String, byte[]> rejectedConsumer;
     static JsonSchema rawEventSchema;
+    static JsonSchema rejectedEventSchema;
 
     @DynamicPropertySource
     static void kafkaProperties(DynamicPropertyRegistry registry) {
@@ -76,34 +75,32 @@ class IngestControllerIT {
     @BeforeAll
     static void createTopicAndConsumer() throws Exception {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            admin.createTopics(List.of(new NewTopic(TOPIC, 12, (short) 1)))
+            admin.createTopics(List.of(new NewTopic(TOPIC, 12, (short) 1), new NewTopic(REJECTED_TOPIC, 3, (short) 1)))
                     .all()
                     .get();
         }
+        consumer = consumerOf(TOPIC);
+        rejectedConsumer = consumerOf(REJECTED_TOPIC);
+        rawEventSchema = ContractFiles.schema("telemetry-raw-event.1.0.json");
+        rejectedEventSchema = ContractFiles.schema("telemetry-rejected-event.1.0.json");
+    }
+
+    static KafkaConsumer<String, byte[]> consumerOf(String topic) {
         Properties p = new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
-        p.put(ConsumerConfig.GROUP_ID_CONFIG, "gateway-test");
+        p.put(ConsumerConfig.GROUP_ID_CONFIG, "gateway-test-" + topic);
         p.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         p.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         p.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class);
-        consumer = new KafkaConsumer<>(p);
-        consumer.subscribe(List.of(TOPIC));
-
-        try (InputStream in = IngestControllerIT.class
-                .getClassLoader()
-                .getResourceAsStream("contracts/schemas/telemetry-raw-event.1.0.json")) {
-            rawEventSchema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
-                    .getSchema(
-                            in,
-                            SchemaValidatorsConfig.builder()
-                                    .formatAssertionsEnabled(true)
-                                    .build());
-        }
+        KafkaConsumer<String, byte[]> c = new KafkaConsumer<>(p);
+        c.subscribe(List.of(topic));
+        return c;
     }
 
     @AfterAll
-    static void closeConsumer() {
+    static void closeConsumers() {
         consumer.close();
+        rejectedConsumer.close();
     }
 
     @Autowired
@@ -188,6 +185,63 @@ class IngestControllerIT {
                         batch.get("events").get(2).get("eventId").asText());
     }
 
+    /**
+     * AT-02 (spec 13.6): a batch with valid and invalid events. Valid events go to telemetry.raw.v1, invalid ones are
+     * listed with their codes in the 202 body AND published to telemetry.rejected.v1 (FR-ING-07).
+     */
+    @Test
+    void at02MixedBatchListsAndPublishesTheRejectedEvents() throws Exception {
+        long rawBefore = recordsInTopic();
+        long rejectedBefore = recordsInTopic(REJECTED_TOPIC, 3);
+        ObjectNode batch = freshBatch(3);
+        ((ObjectNode) batch.get("events").get(1).get("metrics")).put("cpuUsagePercent", 101); // schema
+        ((ObjectNode) batch.get("events").get(2).get("metrics")).put("memoryUsedBytes", 9_999_999_999L); // semantic
+        String batchId = batch.get("batchId").asText();
+
+        JsonNode body = post(batch, KEY)
+                .exchange()
+                .expectStatus()
+                .isAccepted()
+                .expectBody(JsonNode.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(body.get("accepted").asInt()).isEqualTo(1);
+        assertThat(body.get("rejected").asInt()).isEqualTo(2);
+
+        // 202 comes only after Kafka acknowledged every record, so the counts are final here
+        assertThat(recordsInTopic() - rawBefore).isEqualTo(1);
+        assertThat(recordsInTopic(REJECTED_TOPIC, 3) - rejectedBefore).isEqualTo(2);
+        assertThat(readTree(recordsOfBatch(batchId, 1).get(0).value()).get("eventId"))
+                .isEqualTo(batch.get("events").get(0).get("eventId"));
+
+        Map<Integer, JsonNode> bodyByIndex = new HashMap<>();
+        body.get("rejections").forEach(r -> bodyByIndex.put(r.get("index").asInt(), r));
+        assertThat(bodyByIndex.keySet()).containsExactlyInAnyOrder(1, 2);
+        assertThat(bodyByIndex.get(1).get("code").asText()).isEqualTo("SCHEMA_VIOLATION");
+        assertThat(bodyByIndex.get(2).get("code").asText()).isEqualTo("SEMANTIC_VIOLATION");
+
+        for (ConsumerRecord<String, byte[]> record : rejectedOfBatch(batchId, 2)) {
+            JsonNode value = readTree(record.value());
+            assertThat(rejectedEventSchema.validate(value))
+                    .as("record matches telemetry-rejected-event.1.0.json")
+                    .isEmpty();
+            assertThat(record.key()).isEqualTo("agent-checkout-api");
+            int index = value.get("index").asInt();
+            for (String field : List.of("index", "eventId", "code", "message")) {
+                assertThat(value.get(field))
+                        .as(field + " equals the 202 body")
+                        .isEqualTo(bodyByIndex.get(index).get(field));
+            }
+            assertThat(value.get("event"))
+                    .as("the event as sent")
+                    .isEqualTo(batch.get("events").get(index));
+            assertThat(value.get("agentId").asText()).isEqualTo("agent-checkout-api");
+            assertThat(header(record, "event-type")).isEqualTo("TelemetryRejected");
+            assertThat(header(record, "schema-version")).isEqualTo("1.0");
+            assertThat(header(record, "producer")).isEqualTo("ingestion-gateway/0.1.0");
+        }
+    }
+
     @Test
     void eventsOfOneInstanceShareAPartition() {
         ObjectNode batch = freshBatch(3);
@@ -240,8 +294,9 @@ class IngestControllerIT {
     }
 
     @Test
-    void fullyRejectedBatchPublishesNothing() throws Exception {
+    void fullyRejectedBatchPublishesNothingRawButRecordsTheRejections() throws Exception {
         long before = recordsInTopic();
+        long rejectedBefore = recordsInTopic(REJECTED_TOPIC, 3);
         ObjectNode bad = freshBatch(2);
         for (JsonNode event : bad.get("events")) {
             ((ObjectNode) event.get("metrics")).put("memoryUsedBytes", 9_999_999_999L);
@@ -257,6 +312,7 @@ class IngestControllerIT {
                 .isEqualTo(2);
         // 202 is only sent after Kafka acknowledged, so anything published would already be counted here
         assertThat(recordsInTopic()).isEqualTo(before);
+        assertThat(recordsInTopic(REJECTED_TOPIC, 3)).isEqualTo(rejectedBefore + 2);
 
         post(freshBatch(1), KEY).exchange().expectStatus().isAccepted();
         assertThat(recordsInTopic())
@@ -393,9 +449,19 @@ class IngestControllerIT {
         return batch;
     }
 
-    /** Exactly the records of one batch; fails if fewer than {@code expected} arrive within 15 s. */
+    /** Exactly the telemetry.raw.v1 records of one batch; fails if fewer than {@code expected} arrive within 15 s. */
     static List<ConsumerRecord<String, byte[]>> recordsOfBatch(String batchId, int expected) {
-        List<ConsumerRecord<String, byte[]>> mine = pollUntil(batchId, expected).stream()
+        return recordsOfBatch(consumer, batchId, expected);
+    }
+
+    /** Exactly the telemetry.rejected.v1 records of one batch, in the same way. */
+    static List<ConsumerRecord<String, byte[]>> rejectedOfBatch(String batchId, int expected) {
+        return recordsOfBatch(rejectedConsumer, batchId, expected);
+    }
+
+    static List<ConsumerRecord<String, byte[]>> recordsOfBatch(
+            KafkaConsumer<String, byte[]> from, String batchId, int expected) {
+        List<ConsumerRecord<String, byte[]>> mine = pollUntil(from, batchId, expected).stream()
                 .filter(r -> readTree(r.value()).get("batchId").asText().equals(batchId))
                 .toList();
         assertThat(mine).hasSize(expected);
@@ -403,12 +469,13 @@ class IngestControllerIT {
     }
 
     /** Everything polled until {@code expected} records of the batch were seen (or 15 s passed). */
-    static synchronized List<ConsumerRecord<String, byte[]>> pollUntil(String batchId, int expected) {
+    static synchronized List<ConsumerRecord<String, byte[]>> pollUntil(
+            KafkaConsumer<String, byte[]> from, String batchId, int expected) {
         List<ConsumerRecord<String, byte[]>> seen = new ArrayList<>();
         long found = 0;
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         while (found < expected && System.nanoTime() < deadline) {
-            for (ConsumerRecord<String, byte[]> r : consumer.poll(Duration.ofMillis(200))) {
+            for (ConsumerRecord<String, byte[]> r : from.poll(Duration.ofMillis(200))) {
                 seen.add(r);
                 if (readTree(r.value()).get("batchId").asText().equals(batchId)) {
                     found++;
@@ -418,12 +485,16 @@ class IngestControllerIT {
         return seen;
     }
 
-    /** Sum of the end offsets of all partitions = number of records ever written to the topic. */
+    /** Sum of the end offsets of all partitions = number of records ever written to telemetry.raw.v1. */
     static long recordsInTopic() throws Exception {
+        return recordsInTopic(TOPIC, 12);
+    }
+
+    static long recordsInTopic(String topic, int partitions) throws Exception {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
             Map<TopicPartition, OffsetSpec> request = new HashMap<>();
-            for (int p = 0; p < 12; p++) {
-                request.put(new TopicPartition(TOPIC, p), OffsetSpec.latest());
+            for (int p = 0; p < partitions; p++) {
+                request.put(new TopicPartition(topic, p), OffsetSpec.latest());
             }
             return admin.listOffsets(request).all().get().values().stream()
                     .mapToLong(o -> o.offset())

@@ -21,6 +21,7 @@ gateway:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     raw-topic: telemetry.raw.v1
+    rejected-topic: telemetry.rejected.v1
 
 # Probes at /health/live and /health/ready (spec 8.2). Prometheus /metrics comes with observability in week 5.
 management:

@@ -42,8 +42,13 @@ class KafkaUnavailableIT {
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON);
     }
 
+    /**
+     * A fully rejected batch also needs Kafka: its rejections must be on telemetry.rejected.v1 before the 202
+     * (AT-02, FR-ING-01). With the broker down the agent gets 503 and resends; once Kafka is back it gets 202 with
+     * accepted 0 and stops (spec 8.1). ADR-0007.
+     */
     @Test
-    void fullyRejectedBatchStillGets202WithoutKafka() {
+    void fullyRejectedBatchAlsoGets503WithoutKafka() {
         var batch = IngestControllerIT.freshBatch(1);
         ((com.fasterxml.jackson.databind.node.ObjectNode)
                         batch.get("events").get(0).get("metrics"))
@@ -55,9 +60,8 @@ class KafkaUnavailableIT {
                 .bodyValue(batch.toString())
                 .exchange()
                 .expectStatus()
-                .isAccepted()
-                .expectBody()
-                .jsonPath("$.accepted")
-                .isEqualTo(0);
+                .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectHeader()
+                .valueEquals("Retry-After", "5");
     }
 }

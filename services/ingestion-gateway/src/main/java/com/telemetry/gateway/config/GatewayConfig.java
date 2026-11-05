@@ -3,7 +3,7 @@ package com.telemetry.gateway.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telemetry.gateway.auth.AgentCredential;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator;
-import com.telemetry.gateway.publish.RawEventPublisher;
+import com.telemetry.gateway.publish.EventPublisher;
 import com.telemetry.gateway.validation.BatchValidator;
 import java.time.Clock;
 import java.util.HashMap;
@@ -66,13 +66,19 @@ public class GatewayConfig {
     }
 
     @Bean
-    RawEventPublisher rawEventPublisher(
+    EventPublisher eventPublisher(
             KafkaSender<String, byte[]> sender,
             ObjectMapper mapper,
             GatewayProperties props,
             @Value("${spring.application.name}") String appName,
             @Value("${gateway.version:0.1.0}") String version,
             Clock clock) {
-        return new RawEventPublisher(sender, mapper, props.kafka().rawTopic(), appName + "/" + version, clock);
+        return new EventPublisher(
+                sender,
+                mapper,
+                props.kafka().rawTopic(),
+                props.kafka().rejectedTopic(),
+                appName + "/" + version,
+                clock);
     }
 }

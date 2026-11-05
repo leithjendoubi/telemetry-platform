@@ -180,6 +180,9 @@ Part B, observability:
 Progress:
 - A1 done 2026-11-05: `telemetry-rejected-event.1.0.json` + `rejected-event.json`; simulator contract tests (6) and gateway
   `RejectedEventContractTest` (enum = schema codes); planted bugs caught (field not required, undocumented code, extra enum).
+- A2 done 2026-11-05: `EventPublisher` (was RawEventPublisher) sends raw + rejected records together, 202 only when all
+  are acknowledged (ADR-0007; a fully rejected batch now gets 503 while Kafka is down). Rejection messages capped at 1000
+  chars. AT-02 integration test; `mvn verify` green (31 IT); planted bugs caught (rejections not published, wrong key).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)
 Goal (gate G1): **simulator -> gateway -> Kafka -> pass-through stub -> analytics writer ->

@@ -30,11 +30,13 @@ public record GatewayProperties(
     /**
      * @param bootstrapServers Kafka address: localhost:9092 from Windows, kafka:19092 inside compose
      * @param rawTopic         topic for accepted events (spec 8.3)
+     * @param rejectedTopic    topic for rejected events with their reason code (spec 8.3, FR-ING-07)
      * @param producer         extra Kafka producer settings, they override the defaults in KafkaConfig
      */
     public record Kafka(
             @DefaultValue("localhost:9092") String bootstrapServers,
             @DefaultValue("telemetry.raw.v1") String rawTopic,
+            @DefaultValue("telemetry.rejected.v1") String rejectedTopic,
             @DefaultValue Map<String, String> producer) {}
 
     /**
