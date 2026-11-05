@@ -1,0 +1,179 @@
+# CI pipeline (spec 14.4). Runs on every push, on a clean Linux machine.
+#   stage 1  static-checks       format, lint, types, secrets scan
+#   stage 2  unit-tests          JUnit + ArchUnit, pytest, import-linter
+#   stage 3  security            Semgrep, pip-audit, Dependency-Check
+#   stage 4  build-images        service images, Trivy image scan
+#   stage 5  integration-tests   Testcontainers, detection against Kafka, coverage gates
+#   stage 6  smoke-test          bench/scripts/smoke_test.py from empty volumes (gate G1)
+# ESLint, npm audit, Angular tests and AsyncAPI validation join when those parts exist (later weeks).
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_ARGS: -B --no-transfer-progress
+
+jobs:
+  static-checks:
+    name: "1. Static checks"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # the secrets scan reads the whole Git history
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Python tools
+        run: pip install -e "simulator[dev]" -e "services/detection-service[dev]"
+      - name: Secrets scan (Gitleaks)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 git /repo --redact
+      - name: Java format and lint (Spotless, Checkstyle)
+        run: mvn spotless:check checkstyle:check
+      - name: Simulator lint and types (ruff, mypy)
+        working-directory: simulator
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy
+      - name: Detection service lint and types (ruff, mypy)
+        working-directory: services/detection-service
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy
+      - name: Smoke-test script lint (uses the simulator's rules)
+        run: |
+          ruff check --config simulator/pyproject.toml bench/scripts
+          ruff format --config simulator/pyproject.toml --check bench/scripts
+          mypy bench/scripts/smoke_test.py
+
+  unit-tests:
+    name: "2. Unit and architecture tests"
+    needs: static-checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Python tools
+        run: pip install -e "simulator[dev]" -e "services/detection-service[dev]"
+      - name: Java unit tests incl. ArchUnit
+        run: mvn test
+      - name: Simulator tests (contract validation included)
+        working-directory: simulator
+        run: pytest -q
+      - name: Detection service tests without Kafka
+        working-directory: services/detection-service
+        # the 80 % coverage gate runs in stage 5, where the Kafka tests run too
+        run: pytest -q --no-cov -m "not integration"
+      - name: Architecture rules (import-linter)
+        working-directory: services/detection-service
+        run: lint-imports
+
+  security:
+    name: "3. Security analysis"
+    needs: static-checks
+    runs-on: ubuntu-24.04
+    env:
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Python tools
+        run: pip install semgrep==1.183.0 -e "simulator[dev]" -e "services/detection-service[dev]"
+      - name: Code scan (Semgrep)
+        run: semgrep scan --config p/default --severity ERROR --error --metrics off
+      - name: Python dependencies (pip-audit)
+        run: pip-audit --skip-editable
+      - name: Java dependencies (OWASP Dependency-Check)
+        # without the free NVD key the download of the vulnerability database takes hours
+        if: env.NVD_API_KEY != ''
+        run: mvn compile org.owasp:dependency-check-maven:aggregate
+
+  build-images:
+    name: "4. Build and image scan"
+    needs: [unit-tests, security]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [ingestion-gateway, detection-service, analytics-service]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build image
+        run: docker build -f services/${{ matrix.service }}/Dockerfile -t telemetry/${{ matrix.service }}:ci .
+      - name: Image scan (Trivy)
+        run: |
+          docker save telemetry/${{ matrix.service }}:ci -o image.tar
+          docker run --rm -v "$PWD:/scan" aquasec/trivy:0.76.1 image --input /scan/image.tar \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+
+  integration-tests:
+    name: "5. Integration tests"
+    needs: build-images
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install detection service
+        run: pip install -e "services/detection-service[dev]"
+      - name: Java integration tests and coverage gate
+        run: mvn verify
+      - name: Start Kafka for the detection tests
+        run: |
+          cp .env.example .env
+          docker compose -f infra/compose/docker-compose.yml --profile core --env-file .env up -d --wait kafka
+      - name: Detection service tests and coverage gate
+        working-directory: services/detection-service
+        run: pytest -q
+
+  smoke-test:
+    name: "6. End-to-end smoke test (G1)"
+    needs: integration-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install simulator
+        run: pip install -e simulator
+      - name: Run the smoke test from empty volumes
+        run: |
+          cp .env.example .env
+          python bench/scripts/smoke_test.py --clean
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose -f infra/compose/docker-compose.yml --profile core --env-file .env logs --tail 100
