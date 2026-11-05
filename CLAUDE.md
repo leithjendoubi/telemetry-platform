@@ -59,6 +59,27 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
 - In Git Bash, `docker exec ... /opt/kafka/...` needs `MSYS_NO_PATHCONV=1` (PowerShell is fine).
 
 ## Current status
+
+**Next session (written 2026-11-05 at the end of the day; start here).**
+- Finished today, all pushed, CI green up to `65fa7bd` (run 42056349180, all 6 stages, smoke test incl. the new
+  `/metrics` check): CI pipeline live (gate G1), week 5 part A complete (A1-A7: rejected topic AT-02, agent registry
+  AT-03, rate limits AT-04, sanitisation, BlockHound, gzip, graceful shutdown), B1 for gateway and analytics, producer
+  timeout 2 s. The last two commits (`3f9f7a2` timeout, `9e0a660` analytics metrics) were pushed at the end; their
+  CI run had not finished: check it first (`gh run list`).
+- Half-done: nothing uncommitted. Week-5 step B1 still lacks the **detection service** (Python): metrics and JSON logs.
+  Spec 6.5 names the OpenTelemetry Python SDK; the stub has no HTTP port yet (health = heartbeat file), so decide
+  between an OTel metrics exporter (to the collector of B3) and a small `/metrics` HTTP endpoint; spec 8.2 lists
+  `/metrics` for all services.
+- Next steps of the week-5 plan: B1 detection, then B2 (OTel Java agent + Python SDK, W3C traceparent over HTTP and
+  Kafka, traceId in the JSON logs), B3 (compose profile `obs`: OTel Collector, Prometheus, Grafana, Tempo), B4
+  (provisioned dashboards "Platform health" and "Pipeline"), C (smoke test runs AT-02..04, README "Honest status").
+- README "Honest status" has NOT been updated for steps A1-B1 yet (rule 7): do it in step C or earlier.
+- Compose stack is stopped (data kept). Start: `docker compose -f infra/compose/docker-compose.yml --profile core
+  --env-file .env up -d --wait`. If the gateway answers 503 with `UNKNOWN_TOPIC_OR_PARTITION`, run `kafka-init`.
+- Open questions for Leith: (1) the free NVD key for Dependency-Check (`gh secret set NVD_API_KEY`); without it CI
+  skips the Java dependency scan. (2) For the supervisor: Spring Boot 4 / ADR-0006 exception expires 2026-12-31;
+  dead-letter topic naming (bottom of this file).
+
 **Stage 1 (spec weeks 1-3): done and verified on Leith's Windows machine.**
 - `simulator/`: fleet simulator v0 (normal traffic only). 53 tests pass (1 skip is expected: the "pyarrow missing" path), Parquet included.
   Same seed gives bit-identical data on Linux and Windows (fingerprint check done).
