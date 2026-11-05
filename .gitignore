@@ -10,6 +10,7 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+.coverage
 .mypy_cache/
 .ruff_cache/
 
@@ -35,3 +36,6 @@ bench/results/*/raw/
 
 # Company documents: the specification stays local (not pushed to GitHub, decision 2026-10-15)
 CAP-PFE-2026-TEL-084*.pdf
+
+# Claude Code: personal settings of this machine (not shared)
+.claude/settings.local.json

@@ -1,6 +1,15 @@
-# Shell scripts are mounted into Linux containers: they must keep LF line endings,
-# even when the repository is checked out on Windows (CRLF would break "#!/usr/bin/env bash").
+# LF line endings for every text file, on every machine (Windows included).
+# The formatters (Spotless, ruff) and the Linux containers must see the same bytes as the CI runner.
+* text=auto eol=lf
+
+# Shell scripts are mounted into Linux containers: CRLF would break "#!/usr/bin/env bash"
 *.sh   text eol=lf
 Makefile text eol=lf
-*.yml  text eol=lf
-*.yaml text eol=lf
+
+# Binary files: never touch
+*.pdf     binary
+*.png     binary
+*.jpg     binary
+*.gz      binary
+*.parquet binary
+*.jar     binary
