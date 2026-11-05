@@ -26,6 +26,16 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
 - Blocked on purpose (`.claude/settings.local.json` deny list): discarding uncommitted work (`git reset --hard`,
   `git clean`, `git checkout -- .`, `git restore`), force pushes, and any docker command on the Pi-hole container.
   If one of these seems necessary, explain why to Leith instead of working around the block.
+- Speed rules (Leith, 2026-11-05):
+  1. While working on a step, run only the tests of the module you changed (for example
+     `mvn -pl services/ingestion-gateway -am verify`, or the one pytest file). Run the full `mvn verify` and all
+     Python checks once, right before the commit.
+  2. After a push, don't wait for CI: start the next step and check the run (`gh run list` / `gh run view`)
+     before the next push. If CI failed, fix that first.
+  3. Don't re-run checks whose inputs haven't changed.
+  Everything else stays: contracts first, planted bugs, ADRs, simple explanations after each step.
+- Decisions that are Leith's or the supervisor's (accepting a risk, changing the spec stack, making the repository
+  public) are asked, never recorded in his name without his answer.
 
 ## Machine setup (verified 2026-10-14)
 - Windows, PowerShell, Docker Desktop (must show "Engine running" before docker commands).
@@ -151,8 +161,9 @@ PostgreSQL: `localhost:5432`; users and dev passwords are in `.env`.
 ## Week 5 plan: gateway hardening + observability baseline (spec 16.2; approved 2026-11-05)
 Key outputs: **AT-02, AT-03, AT-04 passing; first Grafana dashboards.** Covers FR-ING-02, 04, 05, 06, 07 (rejected),
 08, 09, 11 and NFR-OBS-01. Every step: contracts first, a planted bug proves the new tests can fail, CI green after push.
-Decisions (Leith, 2026-11-05): traces in **Tempo**; **401** for missing or wrong keys, **403** for revoked keys and
-agent-ID mismatch (spec 8.1 error table; the first recommendation "401 for revoked" contradicted it and was dropped); agent cache **10 s** (a revocation takes effect within 10 s); `ingestion_db` schema by
+Decisions (Claude's recommendations, approved by Leith 2026-11-05 with "do all your recommendations"): traces in
+**Tempo**; **401** for missing or wrong keys, **403** for revoked keys and agent-ID mismatch (the recommendation was
+"401 for revoked", which contradicted spec 8.1's error table; Claude switched to 403 after the approval, and told Leith); agent cache **10 s** (a revocation takes effect within 10 s); `ingestion_db` schema by
 **Flyway over JDBC at startup only**, runtime access by R2DBC; **Part A before Part B**; if time runs out, A7 and B2 may
 move to week 6, AT-02..04 and the dashboards may not.
 

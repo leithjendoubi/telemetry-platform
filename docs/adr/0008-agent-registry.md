@@ -1,6 +1,8 @@
 # ADR-0008: Agent registry in ingestion_db
 
-- Status: accepted (decisions 1-3 by Leith, 2026-11-05)
+- Status: accepted. Leith approved two choices on 2026-11-05 ("do all your recommendations"): Flyway over JDBC at
+  start-up (decision 2) and a 10 s cache time (decision 3). Everything else here (table checks, Caffeine, bounded and
+  negative caching, 503 on database failure, the dev seed, draining early answers) was designed by Claude.
 - Date: 2026-11-05
 - Context: week 5, step A3 (FR-ING-05, AT-03). Replaces the configuration file `dev-agents.yml` of ADR-0001.
 

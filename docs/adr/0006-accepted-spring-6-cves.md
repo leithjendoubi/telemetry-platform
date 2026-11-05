@@ -1,6 +1,8 @@
 # ADR-0006: Image-scan findings: patch what can be patched, guard what cannot
 
-- Status: accepted (decided by Leith, 2026-11-05)
+- Status: accepted. Decisions 3 and 4 were chosen by Leith on 2026-11-05 from options Claude offered (his answer:
+  "1A, 2A"; 1A = guarded, time-boxed exception for the 3 Spring CVEs, 2A = upgrade apt in the image). Decisions 1 and 2
+  (Spring Boot 3.5.16, patch pins) are patch upgrades within spec 6.5 that Claude made without asking.
 - Date: 2026-11-05
 - Context: the first CI run failed stage 4 (Trivy, HIGH/CRITICAL with a fix available) on all three images.
   Spec 6.5 fixes Spring Boot 3; spec 14.4 asks for an image scan in CI.
