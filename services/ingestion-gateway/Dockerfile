@@ -16,6 +16,10 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -q -f services/ingestion-gateway/
          extract --layers --launcher --destination /layers
 
 FROM eclipse-temurin:21.0.12.1_1-jre
+# Security fix the base image does not contain yet (apt CVE-2026-109518, fixed in Ubuntu 3.2.1ubuntu0.1; Trivy, CI
+# stage 4, 2026-11-05). Only these two packages. Remove this line once a newer eclipse-temurin tag includes it.
+RUN apt-get update && apt-get install -y --only-upgrade --no-install-recommends apt libapt-pkg7.0 \
+ && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 # least-changing layers first, so a code change only rebuilds the last small layer
