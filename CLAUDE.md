@@ -96,8 +96,9 @@ test only opens `http://localhost:` URLs. Simulator data logic unchanged (seed 4
   2. Dependency-Check runs only if the GitHub secret `NVD_API_KEY` exists; without it stage 3 is green without scanning Java.
   3. `repo.root` = `${project.basedir}/../..` is right for the services but wrong for the root project, so the `aggregate`
      scan's suppression file path points outside the repository.
-  4. Likely first-run CI failures: Gitleaks on the SHA-256 values in `dev-agents.yml`; Trivy findings in base images.
-     (The ruff version mismatch is settled: the detection venv has the pinned 0.16.9.)
+  4. Likely first-run CI failures: Trivy findings in base images. Settled: the ruff mismatch (venv has the pinned
+     0.16.9); Gitleaks (35 hits = the SHA-256 of the public dev keys, checked; `.gitleaks.toml` excuses only 64-hex values
+     in `dev-agents.yml` for the generic-api-key rule; planted GitHub token and non-hex key in that file still caught).
   5. The detection coverage gate needs the compose Kafka running (the Kafka tests cover the service loop).
   6. No ADR yet for the CI pipeline and parent POM (rule 6): write ADR-0005.
   7. No Git remote yet; only branch `main`.

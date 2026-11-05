@@ -1,0 +1,18 @@
+# Gitleaks configuration (CI stage 1, secrets scan). Read automatically from the repository root.
+# Keeps every default rule and adds one narrow exception.
+
+[extend]
+useDefault = true
+
+# dev-agents.yml stores SHA-256 hashes of the PUBLIC simulator dev keys 'dev-agent-<service>' (FR-ING-05: only
+# hashes are stored). Verified 2026-11-05: each of the 35 values equals sha256("dev-agent-<service>").
+# The exception belongs to the generic-api-key rule only and needs both: this file AND a 64-hex-digit value.
+# Every other rule still scans the whole file, and other files are untouched.
+# Goes away in week 5 when agents move to the agent registry in ingestion_db.
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "SHA-256 hashes of public dev API keys"
+condition = "AND"
+paths = ['''(^|/)services/ingestion-gateway/src/main/resources/dev-agents\.yml$''']
+regexes = ['''^[0-9a-f]{64}$''']
