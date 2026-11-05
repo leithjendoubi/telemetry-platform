@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -52,28 +52,28 @@ class ServiceProfile:
     index: int
     name: str
     region: str
-    base_rps: float          # mean requests per second per instance
-    cpu_base: float          # CPU % at zero traffic
-    target_cpu: float        # CPU % at mean traffic
+    base_rps: float  # mean requests per second per instance
+    cpu_base: float  # CPU % at zero traffic
+    target_cpu: float  # CPU % at mean traffic
     threads_base: float
-    threads_extra: float     # extra threads at mean traffic
+    threads_extra: float  # extra threads at mean traffic
     mem_limit_bytes: int
     mem_base_ratio: float
-    mem_saw_amp: float       # height of the GC saw-tooth (fraction of the limit)
-    mem_saw_period: float    # saw-tooth period in samples
+    mem_saw_amp: float  # height of the GC saw-tooth (fraction of the limit)
+    mem_saw_period: float  # saw-tooth period in samples
     lat_base_ms: float
     err_base_pct: float
     gc_base_ms: float
-    rx_per_req: float        # bytes received per request
+    rx_per_req: float  # bytes received per request
     tx_per_req: float
     disk_read_base: float
     disk_write_base: float
-    peak_hour: float         # UTC hour of the daily traffic peak
-    diurnal_amp: float       # 0.3 = traffic swings +-30% around the mean over the day
+    peak_hour: float  # UTC hour of the daily traffic peak
+    diurnal_amp: float  # 0.3 = traffic swings +-30% around the mean over the day
     weekend_factor: float
-    instance_factor: np.ndarray    # per-instance traffic share (instances are not identical)
+    instance_factor: np.ndarray  # per-instance traffic share (instances are not identical)
     instance_offset_ms: np.ndarray  # per-instance sampling offset inside the interval
-    instance_phase: np.ndarray      # per-instance saw-tooth phase (samples)
+    instance_phase: np.ndarray  # per-instance saw-tooth phase (samples)
 
 
 @dataclass
@@ -82,10 +82,10 @@ class ServiceDay:
 
     profile: ServiceProfile
     config: FleetConfig
-    day_number: int           # days since 1970-01-01 (UTC)
-    ts_ms: np.ndarray         # int64 sampling time in ms since epoch
-    metrics: dict[str, np.ndarray]   # keyed by JSON name
-    keep: np.ndarray          # bool: False = sample dropped (never sent)
+    day_number: int  # days since 1970-01-01 (UTC)
+    ts_ms: np.ndarray  # int64 sampling time in ms since epoch
+    metrics: dict[str, np.ndarray]  # keyed by JSON name
+    keep: np.ndarray  # bool: False = sample dropped (never sent)
     _ids: tuple[np.ndarray, np.ndarray] | None = field(default=None, repr=False)  # lazy cache
 
     @property
@@ -179,7 +179,9 @@ class FleetModel:
         irng = np.random.default_rng(np.random.SeedSequence([cfg.seed, _SALT_INSTANCE, idx]))
         n = cfg.instances_per_service
 
-        base_rps = float(np.clip(rng.lognormal(mean=math.log(150.0), sigma=0.8), 10.0, 1500.0))  # heavy-tailed
+        base_rps = float(
+            np.clip(rng.lognormal(mean=math.log(150.0), sigma=0.8), 10.0, 1500.0)
+        )  # heavy-tailed
         cpu_base = float(rng.uniform(4.0, 12.0))
         return ServiceProfile(
             index=idx,
@@ -234,15 +236,19 @@ class FleetModel:
 
         day_start_s = day_number * SECONDS_PER_DAY
         step_idx = np.arange(steps, dtype=np.int64)
-        ts_ms = (day_start_s + step_idx * cfg.interval_seconds)[None, :] * 1000 + p.instance_offset_ms[:, None]
-        hour = (ts_ms % (SECONDS_PER_DAY * 1000)) / 3_600_000.0           # UTC hour of day, (n, steps)
-        weekday = (day_number + 3) % 7                                       # 1970-01-01 was a Thursday; Monday = 0
+        ts_ms = (day_start_s + step_idx * cfg.interval_seconds)[None, :] * 1000 + p.instance_offset_ms[
+            :, None
+        ]
+        hour = (ts_ms % (SECONDS_PER_DAY * 1000)) / 3_600_000.0  # UTC hour of day, (n, steps)
+        weekday = (day_number + 3) % 7  # 1970-01-01 was a Thursday; Monday = 0
         weekend = p.weekend_factor if weekday >= 5 else 1.0
 
         # --- load: daily cycle x weekend x instance share x smooth noise x fast noise (mean is about 1)
         diurnal = 1.0 + p.diurnal_amp * np.cos(2.0 * math.pi * (hour - p.peak_hour) / 24.0)
         load = (
-            diurnal * weekend * p.instance_factor[:, None]
+            diurnal
+            * weekend
+            * p.instance_factor[:, None]
             * np.exp(0.06 * _smooth(rng, n, steps, window=8))
             * np.exp(0.03 * rng.standard_normal((n, steps)))
         )
@@ -252,16 +258,24 @@ class FleetModel:
         cpu_per_rps = (p.target_cpu - p.cpu_base) / p.base_rps
         cpu = np.clip(p.cpu_base + cpu_per_rps * rps + 1.5 * rng.standard_normal((n, steps)), 0.0, 100.0)
 
-        threads = np.maximum(1.0, np.round(p.threads_base + p.threads_extra * load + 2.0 * rng.standard_normal((n, steps))))
+        threads = np.maximum(
+            1.0, np.round(p.threads_base + p.threads_extra * load + 2.0 * rng.standard_normal((n, steps)))
+        )
 
         # --- memory: saw-tooth (allocation then GC) plus a slight load effect; always below 95% of the limit
         saw = ((step_idx[None, :] + p.instance_phase[:, None]) % p.mem_saw_period) / p.mem_saw_period
         mem_ratio = np.clip(
-            p.mem_base_ratio + p.mem_saw_amp * saw + 0.04 * (load - 1.0) + 0.004 * rng.standard_normal((n, steps)),
-            0.05, 0.95,
+            p.mem_base_ratio
+            + p.mem_saw_amp * saw
+            + 0.04 * (load - 1.0)
+            + 0.004 * rng.standard_normal((n, steps)),
+            0.05,
+            0.95,
         )
 
-        latency = p.lat_base_ms * (1.0 + 1.2 * (cpu / 100.0) ** 3) * np.exp(0.08 * rng.standard_normal((n, steps)))
+        latency = (
+            p.lat_base_ms * (1.0 + 1.2 * (cpu / 100.0) ** 3) * np.exp(0.08 * rng.standard_normal((n, steps)))
+        )
         error = np.clip(p.err_base_pct * np.exp(0.4 * rng.standard_normal((n, steps))), 0.0, 100.0)
         gc = p.gc_base_ms * (0.7 + 0.3 * load) * np.exp(0.15 * rng.standard_normal((n, steps)))
         net_rx = rps * p.rx_per_req * np.exp(0.10 * rng.standard_normal((n, steps)))
@@ -305,20 +319,19 @@ def _smooth(rng: np.random.Generator, n: int, steps: int, window: int) -> np.nda
 
 def _uuid7(ts_ms: int, rand_a: int, rand_b: int) -> str:
     """UUID version 7 layout: 48-bit unix ms | ver 7 + 12 random bits | variant 10 + 62 random bits."""
-    return "%08x-%04x-%04x-%04x-%012x" % (
-        (ts_ms >> 16) & 0xFFFFFFFF,
-        ts_ms & 0xFFFF,
-        0x7000 | (rand_a & 0x0FFF),
-        0x8000 | ((rand_b >> 48) & 0x3FFF),
-        rand_b & 0xFFFFFFFFFFFF,
-    )
+    time_high = (ts_ms >> 16) & 0xFFFFFFFF
+    time_low = ts_ms & 0xFFFF
+    version_and_rand_a = 0x7000 | (rand_a & 0x0FFF)
+    variant_and_rand_b = 0x8000 | ((rand_b >> 48) & 0x3FFF)
+    node = rand_b & 0xFFFFFFFFFFFF
+    return f"{time_high:08x}-{time_low:04x}-{version_and_rand_a:04x}-{variant_and_rand_b:04x}-{node:012x}"
 
 
 def _uuid7_list(ts_ms: np.ndarray, rand_a: np.ndarray, rand_b: np.ndarray) -> list[str]:
-    return [_uuid7(t, a, b) for t, a, b in zip(ts_ms.tolist(), rand_a.tolist(), rand_b.tolist())]
+    return [_uuid7(t, a, b) for t, a, b in zip(ts_ms.tolist(), rand_a.tolist(), rand_b.tolist(), strict=True)]
 
 
 def iso_ms(ts_ms: int) -> str:
     """Epoch milliseconds -> '2026-10-12T09:15:00.000Z' (exact, no float rounding)."""
-    dt = datetime.fromtimestamp(ts_ms // 1000, tz=timezone.utc)
+    dt = datetime.fromtimestamp(ts_ms // 1000, tz=UTC)
     return f"{dt:%Y-%m-%dT%H:%M:%S}.{ts_ms % 1000:03d}Z"

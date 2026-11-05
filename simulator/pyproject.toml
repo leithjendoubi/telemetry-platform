@@ -17,9 +17,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "jsonschema>=4.18",  # contract tests
-  "pytest>=8.0",       # optional: the tests are plain unittest and also run under pytest
-  "ruff",
-  "mypy",
+  "openapi-spec-validator==0.9.0",  # contract tests (OpenAPI)
+  "types-PyYAML==6.0.12.20260906",
+  "pandas-stubs==3.0.5.260914",
+  "ruff==0.16.9",
+  "mypy==2.3.1",
+  "pytest>=8",
+  "pytest-cov==7.1.0",
+  "pip-audit==2.10.1",
 ]
 
 [project.scripts]
@@ -30,3 +35,26 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# explicit list, so a newer ruff cannot silently change what CI checks (spec 14.4 stage 1)
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF", "BLE", "S"]
+ignore = [
+  "S311",   # random is used for simulation and jitter, never for security
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]   # assert is how tests check things
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]   # pyarrow ships no type information
+ignore_missing_imports = true
+

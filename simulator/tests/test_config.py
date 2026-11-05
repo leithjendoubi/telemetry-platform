@@ -1,6 +1,7 @@
 import unittest
 
-import helpers  # noqa: F401  (sets up sys.path)
+import helpers
+
 from fleet_sim.config import SERVICE_NAMES, ConfigError, FleetConfig
 
 
@@ -19,7 +20,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.services, 35)
         self.assertEqual(cfg.instances, 350)
         self.assertEqual(cfg.steps_per_day, 5_760)
-        self.assertEqual(cfg.events_per_day, 2_016_000)          # spec 4.1
+        self.assertEqual(cfg.events_per_day, 2_016_000)  # spec 4.1
         self.assertAlmostEqual(cfg.events_per_second, 23.33, places=2)
         self.assertEqual(cfg.drop_rate, 0.0)
 
@@ -39,8 +40,14 @@ class ConfigTests(unittest.TestCase):
             FleetConfig.from_dict({"surprise": 1})
 
     def test_invalid_values_are_rejected(self):
-        for kwargs in ({"services": 0}, {"services": 36}, {"interval_seconds": 7},
-                       {"drop_rate": 1.0}, {"environment": "production"}, {"instances_per_service": 0}):
+        for kwargs in (
+            {"services": 0},
+            {"services": 36},
+            {"interval_seconds": 7},
+            {"drop_rate": 1.0},
+            {"environment": "production"},
+            {"instances_per_service": 0},
+        ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigError):
                 FleetConfig(**kwargs)
 

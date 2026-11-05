@@ -16,9 +16,9 @@ import hashlib
 import json
 import platform
 import sys
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -30,7 +30,13 @@ EPOCH = date(1970, 1, 1)
 
 # Column order of every output file. Matches the telemetry_event table of spec 8.4 where it overlaps.
 COLUMNS: tuple[str, ...] = (
-    "event_time", "event_id", "instance_id", "service_name", "environment", "region", "interval_seconds",
+    "event_time",
+    "event_id",
+    "instance_id",
+    "service_name",
+    "environment",
+    "region",
+    "interval_seconds",
     *(column for _, column in METRICS),
     "label",
 )
@@ -87,13 +93,15 @@ def generate_dataset(
         content = content_digest(cols)
         day_digests.append(content)
         total_rows += rows
-        files.append({
-            "path": rel.as_posix(),
-            "rows": rows,
-            "bytes": path.stat().st_size,
-            "sha256": _file_sha256(path),
-            "contentSha256": content,
-        })
+        files.append(
+            {
+                "path": rel.as_posix(),
+                "rows": rows,
+                "bytes": path.stat().st_size,
+                "sha256": _file_sha256(path),
+                "contentSha256": content,
+            }
+        )
         say(f"{day.isoformat()}: wrote {rows:,} rows -> {rel.as_posix()}")
         model._cache.clear()  # free memory between days
 
@@ -125,7 +133,8 @@ def generate_dataset(
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (out / "incidents.jsonl").write_text("", encoding="utf-8")  # FR-SIM-04; filled in stage 3
-    say(f"manifest written: {total_rows:,} rows, datasetContentSha256={manifest['datasetContentSha256'][:16]}...")
+    digest = str(manifest["datasetContentSha256"])[:16]
+    say(f"manifest written: {total_rows:,} rows, datasetContentSha256={digest}...")
     return manifest
 
 
@@ -155,11 +164,13 @@ def _environment() -> dict:
     env = {"python": platform.python_version(), "numpy": np.__version__}
     try:
         import pandas
+
         env["pandas"] = pandas.__version__
     except ImportError:
         pass
     try:
         import pyarrow
+
         env["pyarrow"] = pyarrow.__version__
     except ImportError:
         pass
@@ -175,7 +186,9 @@ def _csv_writer(path: Path, cols: dict[str, np.ndarray]) -> None:
         frame[key] = cols[key]
     # mtime=0 keeps the gzip header constant, so the same data gives the same file bytes
     frame.to_csv(
-        path, index=False, compression={"method": "gzip", "mtime": 0},
+        path,
+        index=False,
+        compression={"method": "gzip", "mtime": 0},
         date_format="%Y-%m-%dT%H:%M:%S.%fZ",
     )
 
@@ -185,7 +198,9 @@ def _parquet_writer(path: Path, cols: dict[str, np.ndarray]) -> None:
     import pyarrow.parquet as pq
 
     arrays = {
-        "event_time": pa.array(cols["event_time_ms"].astype("datetime64[ms]"), type=pa.timestamp("ms", tz="UTC"))
+        "event_time": pa.array(
+            cols["event_time_ms"].astype("datetime64[ms]"), type=pa.timestamp("ms", tz="UTC")
+        )
     }
     for key in COLUMNS[1:]:
         arrays[key] = pa.array(cols[key])
@@ -197,8 +212,7 @@ def _require_pyarrow() -> None:
         import pyarrow  # noqa: F401
     except ImportError as exc:
         raise OutputError(
-            "Parquet output needs pyarrow (pip install pyarrow). "
-            "Install it, or run again with --format csv."
+            "Parquet output needs pyarrow (pip install pyarrow). Install it, or run again with --format csv."
         ) from exc
 
 

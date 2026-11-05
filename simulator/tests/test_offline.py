@@ -7,12 +7,14 @@ from datetime import date
 from pathlib import Path
 
 import helpers
+
 from fleet_sim import cli
 from fleet_sim.config import FleetConfig
 from fleet_sim.offline import COLUMNS, OutputError, generate_dataset
 
 try:
     import pyarrow  # noqa: F401
+
     HAS_PYARROW = True
 except ImportError:
     HAS_PYARROW = False
@@ -34,8 +36,10 @@ class CsvDatasetTests(unittest.TestCase):
         m = self.gen("a")
         self.assertEqual(m["totals"]["rows"], 2 * 3 * 5_760 * 2)
         self.assertEqual(m["totals"]["rows"], m["totals"]["expectedRowsWithoutDrops"])
-        self.assertEqual([f["path"] for f in m["files"]],
-                         ["date=2026-01-01/part-0000.csv.gz", "date=2026-01-02/part-0000.csv.gz"])
+        self.assertEqual(
+            [f["path"] for f in m["files"]],
+            ["date=2026-01-01/part-0000.csv.gz", "date=2026-01-02/part-0000.csv.gz"],
+        )
         for f in m["files"]:
             self.assertTrue((self.root / "a" / f["path"]).exists())
         self.assertTrue((self.root / "a" / "incidents.jsonl").exists())
@@ -71,8 +75,13 @@ class CsvDatasetTests(unittest.TestCase):
 
     def test_different_seed_changes_the_dataset(self):
         a = self.gen("a")
-        b = generate_dataset(FleetConfig(services=2, instances_per_service=3, seed=7),
-                             self.root / "b", start=START, days=2, fmt="csv")
+        b = generate_dataset(
+            FleetConfig(services=2, instances_per_service=3, seed=7),
+            self.root / "b",
+            start=START,
+            days=2,
+            fmt="csv",
+        )
         self.assertNotEqual(a["datasetContentSha256"], b["datasetContentSha256"])
 
     def test_dropped_samples_reduce_row_count_and_are_reported(self):
@@ -129,8 +138,19 @@ class CliTests(unittest.TestCase):
     def test_generate_small_dataset(self):
         with tempfile.TemporaryDirectory() as tmp:
             code, out, _ = self.run_cli(
-                "generate", "--config", str(helpers.DEFAULT_CONFIG), "--out", tmp + "/ds",
-                "--services", "1", "--instances", "2", "--days", "1", "--format", "csv",
+                "generate",
+                "--config",
+                str(helpers.DEFAULT_CONFIG),
+                "--out",
+                tmp + "/ds",
+                "--services",
+                "1",
+                "--instances",
+                "2",
+                "--days",
+                "1",
+                "--format",
+                "csv",
             )
             self.assertEqual(code, 0, out)
             self.assertIn("11,520 rows", out)

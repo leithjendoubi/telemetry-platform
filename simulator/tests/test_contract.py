@@ -5,9 +5,10 @@ The same files are reused by the Java gateway tests in stage 2, so both sides te
 
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import helpers
+
 from fleet_sim.config import FleetConfig
 from fleet_sim.live import LiveRunner
 from fleet_sim.model import FleetModel
@@ -41,7 +42,7 @@ class ContractFilesTests(unittest.TestCase):
         self.assertTrue(list(self.validator.iter_errors(batch_of(101))))
 
     def test_every_invalid_case_is_rejected_by_the_expected_layer(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         base = helpers.load_json(helpers.VALID_EXAMPLE)
         # make the base fresh so only the case's own change can trigger the 24 h / 5 min rule
         base["agent"]["sentAt"] = helpers.iso_ms_dt(now)
@@ -65,7 +66,7 @@ class SimulatorPayloadTests(unittest.TestCase):
         validator = helpers.make_validator()
         cfg = FleetConfig(services=5, instances_per_service=10)
         runner = LiveRunner(FleetModel(cfg), url="http://unused.invalid", speed=1.0)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         tick = int(now.timestamp()) // 15 * 15
         seen_ids = set()
         for s in range(cfg.services):
@@ -76,7 +77,9 @@ class SimulatorPayloadTests(unittest.TestCase):
             for event in batch["events"]:
                 self.assertRegex(event["timestamp"], helpers.ISO_MS)
                 self.assertEqual(helpers.semantic_errors(event, now + timedelta(seconds=15)), [])
-                self.assertEqual(event["resource"]["serviceName"], batch["events"][0]["resource"]["serviceName"])
+                self.assertEqual(
+                    event["resource"]["serviceName"], batch["events"][0]["resource"]["serviceName"]
+                )
                 seen_ids.add(event["eventId"])
         self.assertEqual(len(seen_ids), 50)  # 5 services x 10 instances, all distinct
 
@@ -121,7 +124,7 @@ class RawEventContractTests(unittest.TestCase):
 
 
 class ScoredEventContractTests(unittest.TestCase):
-    """The Kafka record of telemetry.scored.v1 = one raw record + prediction + scoredAt (spec 8.3, FR-DET-03)."""
+    """Kafka record of telemetry.scored.v1 = one raw record + prediction + scoredAt (spec 8.3, FR-DET-03)."""
 
     def test_scored_event_schema_is_valid_and_example_passes(self):
         from jsonschema import Draft202012Validator, FormatChecker

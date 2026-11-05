@@ -18,9 +18,13 @@ DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "default.yaml
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--config", default=str(DEFAULT_CONFIG), help="YAML config (default: configs/default.yaml)")
+    p.add_argument(
+        "--config", default=str(DEFAULT_CONFIG), help="YAML config (default: configs/default.yaml)"
+    )
     p.add_argument("--seed", type=int, help="override fleet.seed")
-    p.add_argument("--services", type=int, help="override fleet.services (use a small number for quick tests)")
+    p.add_argument(
+        "--services", type=int, help="override fleet.services (use a small number for quick tests)"
+    )
     p.add_argument("--instances", type=int, help="override fleet.instances_per_service")
     p.add_argument("--drop-rate", type=float, help="override sampling.drop_rate")
 
@@ -58,19 +62,31 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
     start = date.fromisoformat(args.start)
     manifest = generate_dataset(
-        cfg, args.out, start=start, days=args.days, fmt=args.format, name=args.name,
+        cfg,
+        args.out,
+        start=start,
+        days=args.days,
+        fmt=args.format,
+        name=args.name,
         progress=lambda m: print(m, flush=True),
     )
     t = manifest["totals"]
-    print(f"done: {t['rows']:,} rows (expected without drops: {t['expectedRowsWithoutDrops']:,}) in {args.out}")
+    print(
+        f"done: {t['rows']:,} rows (expected without drops: {t['expectedRowsWithoutDrops']:,}) in {args.out}"
+    )
     return 0
 
 
 def _cmd_live(args: argparse.Namespace) -> int:
     cfg = _load_config(args)
     runner = LiveRunner(
-        FleetModel(cfg), url=args.url, speed=args.speed, duration=args.duration,
-        workers=args.workers, max_retries=args.max_retries, log=lambda m: print(m, flush=True),
+        FleetModel(cfg),
+        url=args.url,
+        speed=args.speed,
+        duration=args.duration,
+        workers=args.workers,
+        max_retries=args.max_retries,
+        log=lambda m: print(m, flush=True),
     )
     try:
         runner.run()

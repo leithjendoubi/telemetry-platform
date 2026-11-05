@@ -4,10 +4,11 @@ import json
 import threading
 import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import helpers
+
 from fleet_sim.config import FleetConfig
 from fleet_sim.live import LiveRunner
 from fleet_sim.model import FleetModel
@@ -25,15 +26,17 @@ class FakeGateway:
         gateway = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):  # noqa: N802
+            def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 with gateway.lock:
-                    gateway.requests.append({
-                        "path": self.path,
-                        "api_key": self.headers.get("X-API-Key"),
-                        "content_type": self.headers.get("Content-Type"),
-                        "json": json.loads(body),
-                    })
+                    gateway.requests.append(
+                        {
+                            "path": self.path,
+                            "api_key": self.headers.get("X-API-Key"),
+                            "content_type": self.headers.get("Content-Type"),
+                            "json": json.loads(body),
+                        }
+                    )
                     status = gateway.always_status
                     if status is None and gateway.fail_remaining > 0:
                         gateway.fail_remaining -= 1
@@ -47,8 +50,14 @@ class FakeGateway:
                     doc = json.loads(body)
                     self.send_response(202)
                     self.send_header("Content-Type", "application/json")
-                    payload = json.dumps({"batchId": doc["batchId"], "accepted": len(doc["events"]),
-                                          "rejected": 0, "rejections": []}).encode()
+                    payload = json.dumps(
+                        {
+                            "batchId": doc["batchId"],
+                            "accepted": len(doc["events"]),
+                            "rejected": 0,
+                            "rejections": [],
+                        }
+                    ).encode()
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
@@ -73,8 +82,8 @@ CFG = FleetConfig(services=3, instances_per_service=10)
 
 
 def make_runner(url, **kw):
-    kw.setdefault("speed", 150.0)     # 150 virtual seconds = 10 ticks of 15 s ...
-    kw.setdefault("duration", 1.0)    # ... squeezed into 1 real second
+    kw.setdefault("speed", 150.0)  # 150 virtual seconds = 10 ticks of 15 s ...
+    kw.setdefault("duration", 1.0)  # ... squeezed into 1 real second
     kw.setdefault("backoff_base", 0.001)
     kw.setdefault("workers", 4)
     return LiveRunner(FleetModel(CFG), url=url, **kw)
@@ -83,13 +92,13 @@ def make_runner(url, **kw):
 class LiveModeTests(unittest.TestCase):
     def test_sends_valid_batches_with_the_right_headers(self):
         validator = helpers.make_validator()
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         with FakeGateway() as gw:
             stats = make_runner(gw.url).run()
-        finished = datetime.now(timezone.utc)
+        finished = datetime.now(UTC)
 
-        self.assertEqual(stats.batches_sent, 30)          # 3 agents x 10 ticks
-        self.assertEqual(stats.events_sent, 300)          # 30 events per tick
+        self.assertEqual(stats.batches_sent, 30)  # 3 agents x 10 ticks
+        self.assertEqual(stats.events_sent, 300)  # 30 events per tick
         self.assertEqual(stats.accepted, 300)
         self.assertEqual(stats.failed_batches, 0)
         self.assertEqual(stats.retries, 0)
@@ -106,7 +115,9 @@ class LiveModeTests(unittest.TestCase):
             batch_ids.add(doc["batchId"])
             for ev in doc["events"]:
                 event_ids.add(ev["eventId"])
-                self.assertEqual(helpers.semantic_errors(ev, finished), [])  # not older than 24 h, not in the future
+                self.assertEqual(
+                    helpers.semantic_errors(ev, finished), []
+                )  # not older than 24 h, not in the future
                 self.assertLessEqual(helpers.parse_ts(ev["timestamp"]), finished + timedelta(seconds=1))
         self.assertEqual(len(batch_ids), 30)
         self.assertEqual(len(event_ids), 300)
@@ -117,10 +128,14 @@ class LiveModeTests(unittest.TestCase):
             runner = make_runner(gw.url)
             before = time.time()
             runner.run()
-        newest = max(helpers.parse_ts(e["timestamp"]).timestamp() for r in gw.requests for e in r["json"]["events"])
-        oldest = min(helpers.parse_ts(e["timestamp"]).timestamp() for r in gw.requests for e in r["json"]["events"])
+        newest = max(
+            helpers.parse_ts(e["timestamp"]).timestamp() for r in gw.requests for e in r["json"]["events"]
+        )
+        oldest = min(
+            helpers.parse_ts(e["timestamp"]).timestamp() for r in gw.requests for e in r["json"]["events"]
+        )
         self.assertLessEqual(newest, time.time())
-        self.assertLess(oldest, before - 100)   # a 150 s virtual window really starts in the past
+        self.assertLess(oldest, before - 100)  # a 150 s virtual window really starts in the past
 
     def test_retries_429_and_503_then_succeeds(self):
         for status in (429, 503):
@@ -128,9 +143,9 @@ class LiveModeTests(unittest.TestCase):
                 stats = make_runner(gw.url).run()
                 self.assertEqual(stats.retries, 3)
                 self.assertEqual(stats.status_counts[status], 3)
-                self.assertEqual(stats.batches_sent, 30)       # nothing lost
+                self.assertEqual(stats.batches_sent, 30)  # nothing lost
                 self.assertEqual(stats.failed_batches, 0)
-                self.assertEqual(len(gw.requests), 33)         # 30 batches + 3 retried attempts
+                self.assertEqual(len(gw.requests), 33)  # 30 batches + 3 retried attempts
 
     def test_does_not_retry_permanent_errors(self):
         with FakeGateway(always_status=401) as gw:
@@ -138,19 +153,20 @@ class LiveModeTests(unittest.TestCase):
         self.assertEqual(stats.retries, 0)
         self.assertEqual(stats.failed_batches, 30)
         self.assertEqual(stats.batches_sent, 0)
-        self.assertEqual(len(gw.requests), 30)                 # exactly one attempt per batch
+        self.assertEqual(len(gw.requests), 30)  # exactly one attempt per batch
 
     def test_gives_up_after_max_retries(self):
         with FakeGateway(always_status=503) as gw:
             stats = make_runner(gw.url, max_retries=2).run()
         self.assertEqual(stats.failed_batches, 30)
-        self.assertEqual(stats.retries, 60)                    # 2 retries per batch
-        self.assertEqual(len(gw.requests), 90)                 # 3 attempts per batch
+        self.assertEqual(stats.retries, 60)  # 2 retries per batch
+        self.assertEqual(len(gw.requests), 90)  # 3 attempts per batch
 
     def test_unreachable_gateway_is_survived(self):
-        # port 9 (discard) on localhost refuses the connection: network error -> retried, then counted as failed
-        stats = make_runner("http://127.0.0.1:9/api/v1/telemetry/ingest", max_retries=1, duration=0.3,
-                            speed=50.0).run()
+        # port 9 (discard) on localhost refuses the connection: network error, retried, then counted failed
+        stats = make_runner(
+            "http://127.0.0.1:9/api/v1/telemetry/ingest", max_retries=1, duration=0.3, speed=50.0
+        ).run()
         self.assertEqual(stats.batches_sent, 0)
         self.assertGreater(stats.failed_batches, 0)
 
@@ -161,6 +177,12 @@ class LiveModeTests(unittest.TestCase):
     def test_compressed_window_cannot_exceed_23_hours(self):
         with self.assertRaises(ValueError):
             LiveRunner(FleetModel(CFG), url="http://x.invalid", speed=1000.0, duration=100.0)
+
+    def test_only_http_urls_are_accepted(self):
+        for url in ("file:///etc/passwd", "ftp://x.invalid/ingest", "localhost:8081/api"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                LiveRunner(FleetModel(CFG), url=url)
+        LiveRunner(FleetModel(CFG), url="https://x.invalid/api/v1/telemetry/ingest")  # no error
 
 
 if __name__ == "__main__":

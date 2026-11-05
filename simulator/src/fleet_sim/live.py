@@ -18,20 +18,21 @@ valid, so it is counted and NOT retried.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import random
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Callable
 
-from .config import FleetConfig
 from .model import SECONDS_PER_DAY, FleetModel, iso_ms
 
 MAX_COMPRESSED_WINDOW_S = 23 * 3600
@@ -84,6 +85,8 @@ class LiveRunner:
         sleep: Callable[[float], None] = time.sleep,
         log: Callable[[str], None] | None = None,
     ):
+        if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+            raise ValueError("url must start with http:// or https://")
         if speed <= 0:
             raise ValueError("speed must be positive")
         if speed > 1 and duration is None:
@@ -130,22 +133,23 @@ class LiveRunner:
 
     # ---------------------------------------------------------------- sending
     def _post(self, api_key: str, body: bytes) -> tuple[int, float | None, dict | None]:
-        """One HTTP attempt. Returns (status, retry_after_seconds, parsed_json_or_None). Status 0 = network error."""
-        request = urllib.request.Request(
-            self.url, data=body, method="POST",
+        """One HTTP attempt: (status, retry_after_s, parsed JSON or None). Status 0 = network error."""
+        # the scheme is checked in __init__ (http/https only), so no file: or custom URL can be opened
+        request = urllib.request.Request(  # noqa: S310
+            self.url,
+            data=body,
+            method="POST",
             headers={"Content-Type": "application/json", "X-API-Key": api_key},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310
                 return response.status, None, _json_or_none(response.read())
         except urllib.error.HTTPError as err:
             retry_after = None
             raw = err.headers.get("Retry-After") if err.headers else None
             if raw:
-                try:
+                with contextlib.suppress(ValueError):
                     retry_after = min(float(raw), MAX_RETRY_AFTER_S)
-                except ValueError:
-                    pass
             return err.code, retry_after, _json_or_none(err.read())
         except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
             return 0, None, None
@@ -184,9 +188,10 @@ class LiveRunner:
         cfg, interval = self.cfg, self.cfg.interval_seconds
         wall_start = self.clock()
         window = None if self.duration is None else self.speed * self.duration
-        virtual_start = wall_start - (self.speed * self.duration if self.speed > 1 else 0.0)
+        # speed > 1 always comes with a duration (checked in __init__), so window is set then
+        virtual_start = wall_start - (window if self.speed > 1 and window is not None else 0.0)
         virtual_end = None if window is None else virtual_start + window
-        tick_start = int(math.floor(virtual_start / interval)) * interval
+        tick_start = math.floor(virtual_start / interval) * interval
 
         self.log(
             f"live run: {cfg.services} agents, {cfg.instances} instances, speed x{self.speed:g}, "

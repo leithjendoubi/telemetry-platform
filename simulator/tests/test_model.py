@@ -2,11 +2,11 @@ import unittest
 from dataclasses import replace
 from datetime import date
 
+import helpers
 import numpy as np
 
-import helpers
 from fleet_sim.config import FleetConfig
-from fleet_sim.model import METRICS, FleetModel
+from fleet_sim.model import METRICS, FleetModel, _uuid7
 
 EPOCH = date(1970, 1, 1)
 
@@ -42,12 +42,15 @@ class DeterminismTests(unittest.TestCase):
         a, b = FleetModel(cfg1), FleetModel(cfg2)
         b.profiles = a.profiles
         da, db = a.service_day(0, MONDAY), b.service_day(0, MONDAY)
-        self.assertFalse(np.array_equal(da.metrics["httpRequestsPerSec"], db.metrics["httpRequestsPerSec"]),
-                         "day noise ignores the seed")
+        self.assertFalse(
+            np.array_equal(da.metrics["httpRequestsPerSec"], db.metrics["httpRequestsPerSec"]),
+            "day noise ignores the seed",
+        )
         self.assertFalse(np.array_equal(da.keep, db.keep), "drop mask ignores the seed")
         full = np.ones_like(da.keep)
-        self.assertNotEqual(da.event_ids_for_mask(full)[:50], db.event_ids_for_mask(full)[:50],
-                            "event ids ignore the seed")
+        self.assertNotEqual(
+            da.event_ids_for_mask(full)[:50], db.event_ids_for_mask(full)[:50], "event ids ignore the seed"
+        )
 
     def test_generation_order_does_not_matter(self):
         cfg = FleetConfig(services=3, instances_per_service=2)
@@ -101,6 +104,14 @@ class TimestampTests(unittest.TestCase):
 
 
 class EventIdTests(unittest.TestCase):
+    def test_uuid7_layout_is_fixed(self):
+        # golden values: any change to the formatting would change every eventId of every dataset
+        self.assertEqual(
+            _uuid7(1_760_000_000_123, 0xABC, 0x1234_5678_9ABC_DEF0), "0199c82c-c07b-7abc-9234-56789abcdef0"
+        )
+        self.assertEqual(_uuid7(0, 0, 0), "00000000-0000-7000-8000-000000000000")
+        self.assertEqual(_uuid7(2**48 - 1, 2**12 - 1, 2**62 - 1), "ffffffff-ffff-7fff-bfff-ffffffffffff")
+
     def test_ids_are_unique_uuid_v7(self):
         sd = FleetModel(FleetConfig(services=1, instances_per_service=10)).service_day(0, MONDAY)
         ids = sd.event_ids_for_mask(sd.keep)
@@ -148,7 +159,7 @@ class RealismTests(unittest.TestCase):
             self.assertGreater(by_hour.max() / by_hour.min(), 1.3, sd.profile.name)
 
     def test_weekend_traffic_is_lower(self):
-        for wd, we in zip(self.weekday, self.weekend):
+        for wd, we in zip(self.weekday, self.weekend, strict=True):
             ratio = we.metrics["httpRequestsPerSec"].mean() / wd.metrics["httpRequestsPerSec"].mean()
             self.assertLess(ratio, 0.95, wd.profile.name)
 
@@ -161,7 +172,7 @@ class RealismTests(unittest.TestCase):
 
     def test_services_differ_from_each_other(self):
         means = {sd.profile.name: float(sd.metrics["httpRequestsPerSec"].mean()) for sd in self.weekday}
-        self.assertGreater(len(set(round(v) for v in means.values())), 1)
+        self.assertGreater(len({round(v) for v in means.values()}), 1)
 
     def test_normal_traffic_has_no_incident_like_cpu_saturation(self):
         for sd in self.weekday:

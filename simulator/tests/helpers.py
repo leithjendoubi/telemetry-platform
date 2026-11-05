@@ -6,7 +6,7 @@ import copy
 import json
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 SIM_DIR = Path(__file__).resolve().parents[1]
@@ -43,7 +43,7 @@ def parse_ts(value: str) -> datetime:
 
 
 def iso_ms_dt(dt: datetime) -> str:
-    dt = dt.astimezone(timezone.utc)
+    dt = dt.astimezone(UTC)
     return f"{dt:%Y-%m-%dT%H:%M:%S}.{dt.microsecond // 1000:03d}Z"
 
 
