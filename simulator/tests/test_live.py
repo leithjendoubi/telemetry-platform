@@ -162,11 +162,13 @@ class LiveModeTests(unittest.TestCase):
             if seconds < 1:  # the runner's own pacing really waits; the long retry waits are only recorded
                 time.sleep(seconds)
 
-        with FakeGateway(fail_first=6, fail_status=429, retry_after="7") as gw:
-            stats = make_runner(gw.url, sleep=sleep).run()
+        # one worker: the 4 refusals hit the first batch in a fixed order (with several workers, which
+        # batch gets them depends on timing, and one batch could run out of retries)
+        with FakeGateway(fail_first=4, fail_status=429, retry_after="7") as gw:
+            stats = make_runner(gw.url, sleep=sleep, workers=1).run()
         retry_waits = [w for w in waits if w >= 1]
-        self.assertEqual(stats.retries, 6)
-        self.assertEqual(len(retry_waits), 6)
+        self.assertEqual(stats.retries, 4)
+        self.assertEqual(len(retry_waits), 4)
         self.assertTrue(all(w >= 7 for w in retry_waits), retry_waits)
 
     def test_does_not_retry_permanent_errors(self):
