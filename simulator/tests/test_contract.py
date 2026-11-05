@@ -27,6 +27,16 @@ class ContractFilesTests(unittest.TestCase):
 
         Draft202012Validator.check_schema(helpers.load_json(helpers.SCHEMA_PATH))
 
+    def test_patterns_use_the_ecma_end_of_text(self):
+        self.assertEqual(helpers.ecma_anchors("^[a-z]{0,3}$"), r"^[a-z]{0,3}\Z")
+        self.assertEqual(helpers.ecma_anchors(r"^a\$b$"), r"^a\$b\Z")  # an escaped $ is a literal dollar
+        self.assertEqual(helpers.ecma_anchors("^[$]+$"), r"^[$]+\Z")  # inside [...] too
+        doc = helpers.load_json(helpers.VALID_EXAMPLE)
+        doc["events"][0]["resource"]["instanceId"] = "checkout-api-07\n"
+        self.assertTrue(
+            list(self.validator.iter_errors(doc)), "a trailing newline is not the end of the text"
+        )
+
     def test_valid_example_passes(self):
         errors = list(self.validator.iter_errors(self.valid))
         self.assertEqual([e.message for e in errors], [])

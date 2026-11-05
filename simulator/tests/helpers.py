@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import sys
 from datetime import UTC, datetime, timedelta
@@ -35,11 +36,41 @@ def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def make_validator():
-    """JSON Schema draft 2020-12 validator with format checking (uuid, ...)."""
-    from jsonschema import Draft202012Validator, FormatChecker
+def ecma_anchors(pattern: str) -> str:
+    r"""Rewrites a JSON Schema pattern for Python's re: an unescaped '$' outside [...] becomes '\Z'.
 
-    return Draft202012Validator(load_json(SCHEMA_PATH), format_checker=FormatChecker())
+    JSON Schema patterns are ECMA-262, where '$' is the very end of the text; in Python (and Java) '$'
+    also matches before a final newline, so "id\n" would pass '^[a-z]+$' (contract README, rule 4).
+    The gateway does the same.
+    """
+    out, i, in_class = [], 0, False
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\":
+            out.append(pattern[i : i + 2])
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "$":
+            c = r"\Z"
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def make_validator():
+    """JSON Schema draft 2020-12 validator with format checking (uuid, ...) and ECMA-262 '$' in patterns."""
+    from jsonschema import Draft202012Validator, FormatChecker, ValidationError, validators
+
+    def pattern(validator, regex, instance, schema):
+        if validator.is_type(instance, "string") and not re.search(ecma_anchors(regex), instance):
+            yield ValidationError(f"{instance!r} does not match {regex!r}")
+
+    ecma_validator = validators.extend(Draft202012Validator, {"pattern": pattern})
+    return ecma_validator(load_json(SCHEMA_PATH), format_checker=FormatChecker())
 
 
 def parse_ts(value: str) -> datetime:
@@ -60,6 +91,8 @@ def semantic_errors(event: dict, now: datetime) -> list[str]:
     metrics = event["metrics"]
     if metrics["memoryUsedBytes"] > metrics["memoryLimitBytes"]:
         errors.append("SEMANTIC_VIOLATION")
+    if any(isinstance(v, float) and not math.isfinite(v) for v in metrics.values()):
+        errors.append("SEMANTIC_VIOLATION")  # e.g. 1e400, which json turns into inf (FR-ING-04)
     return errors
 
 
@@ -71,7 +104,9 @@ def _walk(doc, parts):
 
 
 def _resolve_relative(value, now: datetime):
-    """'RELATIVE:-25h' / 'RELATIVE:+10m' -> ISO timestamp relative to `now`."""
+    """'RELATIVE:-25h' / 'RELATIVE:+10m' -> ISO timestamp relative to `now`; 'NUMBER:1e400' -> that number."""
+    if isinstance(value, str) and value.startswith("NUMBER:"):
+        return json.loads(value.removeprefix("NUMBER:"))
     if isinstance(value, str) and value.startswith("RELATIVE:"):
         m = re.fullmatch(r"RELATIVE:([+-])(\d+)([hm])", value)
         amount = int(m.group(2)) * (3600 if m.group(3) == "h" else 60)

@@ -17,6 +17,9 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -252,6 +255,23 @@ class IngestControllerIT {
             assertThat(header(record, "schema-version")).isEqualTo("1.0");
             assertThat(header(record, "producer")).isEqualTo("ingestion-gateway/0.1.0");
         }
+    }
+
+    /** FR-ING-04: a timestamp sent with an offset reaches telemetry.raw.v1 as the same instant in UTC. */
+    @Test
+    void timestampWithAnOffsetReachesKafkaInUtc() {
+        Instant eventTime = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.MILLIS);
+        DateTimeFormatter millis = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSxxx");
+        ObjectNode batch = freshBatch(1);
+        ((ObjectNode) batch.get("events").get(0))
+                .put("timestamp", eventTime.atOffset(ZoneOffset.ofHours(2)).format(millis));
+        post(batch, KEY).exchange().expectStatus().isAccepted();
+
+        JsonNode value =
+                readTree(recordsOfBatch(batch.get("batchId").asText(), 1).get(0).value());
+        assertThat(value.get("timestamp").asText())
+                .isEqualTo(eventTime.atOffset(ZoneOffset.UTC).format(millis).replace("+00:00", "Z"));
+        assertThat(rawEventSchema.validate(value)).isEmpty();
     }
 
     @Test

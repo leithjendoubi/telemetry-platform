@@ -20,7 +20,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -34,8 +38,10 @@ import java.util.TreeMap;
  * <ol>
  *   <li>the JSON Schema of libs/telemetry-contracts (draft 2020-12, formats such as uuid and date-time checked);</li>
  *   <li>the per-event rules JSON Schema cannot express (spec 8.1): allowed service, timestamp window,
- *       memoryUsed &lt;= memoryLimit, no duplicate eventId inside the batch.</li>
+ *       memoryUsed &lt;= memoryLimit, finite metrics (FR-ING-04), no duplicate eventId inside the batch.</li>
  * </ol>
+ * Schema patterns use the ECMA-262 '$' ({@link EcmaRegularExpressionFactory}), and accepted events get their timestamp
+ * in UTC (FR-ING-04).
  * A schema error inside {@code events[i]} only rejects that event. Any other schema error rejects the whole batch.
  * Each rejected event gets exactly one code: the first rule it breaks, in the order of the list above.
  *
@@ -58,6 +64,7 @@ public class BatchValidator {
         SchemaValidatorsConfig config = SchemaValidatorsConfig.builder()
                 .formatAssertionsEnabled(true) // in draft 2020-12 "format" is only a hint unless switched on
                 .pathType(PathType.JSON_POINTER) // error messages say /events/0/metrics/... like the contract tests
+                .regularExpressionFactory(EcmaRegularExpressionFactory.INSTANCE) // '$' = end of text (FR-ING-04)
                 .build();
         try (InputStream in = BatchValidator.class.getClassLoader().getResourceAsStream(SCHEMA_RESOURCE)) {
             if (in == null) {
@@ -120,10 +127,12 @@ public class BatchValidator {
                 continue;
             }
 
+            String timestampText = event.get("timestamp").asText();
+            OffsetDateTime timestampWithOffset;
             Instant timestamp;
             try {
-                timestamp =
-                        OffsetDateTime.parse(event.get("timestamp").asText()).toInstant();
+                timestampWithOffset = OffsetDateTime.parse(timestampText);
+                timestamp = timestampWithOffset.toInstant();
             } catch (DateTimeParseException e) {
                 // valid RFC 3339 that Java cannot read, e.g. a leap second "23:59:60"
                 rejections.add(new Rejection(
@@ -155,6 +164,17 @@ public class BatchValidator {
                 continue;
             }
 
+            // FR-ING-04: a literal like 1e400 passes "minimum 0" but is Infinity for every JSON parser downstream
+            String notFinite = firstNonFiniteMetric(metrics);
+            if (notFinite != null) {
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.SEMANTIC_VIOLATION,
+                        "metrics." + notFinite + " is too large for a 64-bit number (it would become Infinity)"));
+                continue;
+            }
+
             // UUIDs are compared case-insensitively; the first accepted copy wins
             if (!acceptedIds.add(eventId.toLowerCase(Locale.ROOT))) {
                 rejections.add(new Rejection(
@@ -165,9 +185,47 @@ public class BatchValidator {
                 continue;
             }
 
-            accepted.add(new AcceptedEvent(i, (ObjectNode) event));
+            accepted.add(new AcceptedEvent(i, inUtc((ObjectNode) event, timestampText, timestampWithOffset)));
         }
         return new Checked(accepted, rejections);
+    }
+
+    /** The name of the first metric that is not a finite 64-bit number, or null. */
+    private static String firstNonFiniteMetric(JsonNode metrics) {
+        for (Map.Entry<String, JsonNode> metric : metrics.properties()) {
+            if (metric.getValue().isNumber()
+                    && !Double.isFinite(metric.getValue().doubleValue())) {
+                return metric.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * FR-ING-04: the event with its timestamp in UTC. A timestamp already in UTC ("...Z") is kept exactly as sent;
+     * one with an offset (e.g. "+02:00") becomes the same instant in UTC with the same number of fraction digits.
+     * Only accepted events are changed; the 202 body and telemetry.rejected.v1 keep what the agent sent.
+     */
+    private static ObjectNode inUtc(ObjectNode event, String text, OffsetDateTime timestamp) {
+        if (text.endsWith("Z")) {
+            return event;
+        }
+        int dot = text.indexOf('.');
+        int fractionDigits = 0;
+        if (dot >= 0) {
+            while (dot + 1 + fractionDigits < text.length()
+                    && Character.isDigit(text.charAt(dot + 1 + fractionDigits))) {
+                fractionDigits++;
+            }
+        }
+        DateTimeFormatterBuilder format = new DateTimeFormatterBuilder().appendPattern("uuuu-MM-dd'T'HH:mm:ss");
+        if (fractionDigits > 0) {
+            format.appendFraction(ChronoField.NANO_OF_SECOND, fractionDigits, fractionDigits, true);
+        }
+        DateTimeFormatter utc = format.appendLiteral('Z').toFormatter(Locale.ROOT);
+        ObjectNode normalised = event.deepCopy();
+        normalised.put("timestamp", utc.format(timestamp.withOffsetSameInstant(ZoneOffset.UTC)));
+        return normalised;
     }
 
     /** i when the error is inside /events/i, otherwise null (an envelope error, including /events itself). */

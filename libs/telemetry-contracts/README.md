@@ -19,7 +19,9 @@ It contains data shapes only, never business logic.
 ## Kafka record of `telemetry.raw.v1` (produced by the ingestion gateway)
 
 - **Key:** `resource.instanceId` (UTF-8 string), so all events of one instance stay in order on one partition.
-- **Value:** UTF-8 JSON matching `telemetry-raw-event.1.0.json`. The event fields are copied unchanged from the request.
+- **Value:** UTF-8 JSON matching `telemetry-raw-event.1.0.json`. The event fields are copied unchanged from the request,
+  except `timestamp`, which is always in UTC (FR-ING-04): one sent with an offset (`+02:00`) arrives as the same instant
+  with `Z` and the same number of fraction digits; one already in UTC is kept exactly as sent.
 - **Headers (spec 8.3 envelope):** `event-type` = `TelemetryReceived`, `schema-version` = `1.0`,
   `produced-at` (RFC 3339, UTC), `producer` = `ingestion-gateway/<version>`. `traceparent` is added with OpenTelemetry in week 5.
 
@@ -28,6 +30,9 @@ It contains data shapes only, never business logic.
 1. **Contracts first.** Change the schema before changing code (spec principle 5).
 2. **No breaking change without a version bump.** Adding a required field or tightening a limit means a new file `telemetry-batch.1.1.json` or `2.0.json`, never an edit of `1.0`.
 3. The gateway (Java) and the simulator (Python) test against these same files, so the two sides cannot drift apart (risk R-08).
+4. **Patterns are ECMA-262**, as JSON Schema requires: `$` means the very end of the text. Java's and Python's regex engines
+   also let `$` match before a final newline, so `"checkout-api-07\n"` would pass `^[A-Za-z0-9]...$`. Every validator of these
+   schemas must read `$` as the true end (the gateway and the Python tests translate it to `\z` / `\Z`).
 
 ## What JSON Schema cannot check
 
@@ -37,6 +42,7 @@ These rules of spec 8.1 are applied by code after schema validation, one event a
 |------|----------------|
 | timestamp older than 24 h or more than 5 min in the future | `TIMESTAMP_OUT_OF_RANGE` |
 | `memoryUsedBytes` greater than `memoryLimitBytes` | `SEMANTIC_VIOLATION` |
+| a metric too large for a 64-bit float (e.g. `1e400`, which parsers turn into Infinity; FR-ING-04) | `SEMANTIC_VIOLATION` |
 | duplicate `eventId` inside one batch | `DUPLICATE_EVENT_ID` |
 | `serviceName` not in the agent's allow-list | `SERVICE_NOT_PERMITTED` |
 | any schema violation of the event | `SCHEMA_VIOLATION` |

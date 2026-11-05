@@ -37,6 +37,37 @@ class BatchValidatorTest {
         assertThat(result.accepted().get(0).index()).isZero();
     }
 
+    /** FR-ING-04: accepted events carry their timestamp in UTC; the request itself is not changed. */
+    @Test
+    void timestampWithAnOffsetBecomesTheSameInstantInUtc() {
+        for (String[] sentAndExpected : new String[][] {
+            {"2026-10-14T13:59:30.123+02:00", "2026-10-14T11:59:30.123Z"},
+            {"2026-10-14T06:59:30-05:00", "2026-10-14T11:59:30Z"},
+            {"2026-10-14T11:59:30.123456+00:00", "2026-10-14T11:59:30.123456Z"},
+            {"2026-10-14t11:59:30.5z", "2026-10-14T11:59:30.5Z"}
+        }) {
+            ObjectNode batch = ContractFiles.freshValidBatch(NOW);
+            ((ObjectNode) batch.get("events").get(0)).put("timestamp", sentAndExpected[0]);
+            Checked result = checked(batch);
+            assertThat(result.accepted()).as(sentAndExpected[0]).hasSize(1);
+            assertThat(result.accepted().get(0).event().get("timestamp").asText())
+                    .as(sentAndExpected[0])
+                    .isEqualTo(sentAndExpected[1]);
+            assertThat(batch.get("events").get(0).get("timestamp").asText())
+                    .as("the request (202 body, rejected topic) keeps what was sent")
+                    .isEqualTo(sentAndExpected[0]);
+        }
+    }
+
+    @Test
+    void utcTimestampIsKeptExactlyAsSent() {
+        ObjectNode batch = ContractFiles.freshValidBatch(NOW);
+        String sent = batch.get("events").get(0).get("timestamp").asText();
+        assertThat(sent).endsWith("Z");
+        assertThat(checked(batch).accepted().get(0).event().get("timestamp").asText())
+                .isEqualTo(sent);
+    }
+
     static Stream<InvalidCase> invalidCases() {
         return ContractFiles.invalidCases().stream();
     }

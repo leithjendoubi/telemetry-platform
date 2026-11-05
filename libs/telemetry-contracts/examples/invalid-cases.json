@@ -15,12 +15,20 @@
     { "name": "identifier-with-space",     "set": { "/events/0/resource/instanceId": "checkout api 07" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
     { "name": "identifier-injection",      "set": { "/events/0/resource/serviceName": "x'; DROP TABLE t;--" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
     { "name": "interval-zero",             "set": { "/events/0/intervalSeconds": 0 },                  "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "unknown-event-field",       "set": { "/events/0/debug": true },                         "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "unknown-resource-field",    "set": { "/events/0/resource/zone": "a" },                  "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
+    { "name": "identifier-with-nul",       "set": { "/events/0/resource/instanceId": "checkout-api-07\u0000" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
+    { "name": "identifier-trailing-newline", "set": { "/events/0/resource/instanceId": "checkout-api-07\n" }, "expect": "SCHEMA", "code": "SCHEMA_VIOLATION" },
+    { "name": "agent-version-trailing-newline", "set": { "/agent/agentVersion": "1.4.2\n" },          "expect": "SCHEMA",   "code": "SCHEMA_VIOLATION" },
     { "name": "memory-used-over-limit",    "set": { "/events/0/metrics/memoryUsedBytes": 3000000000 }, "expect": "SEMANTIC", "code": "SEMANTIC_VIOLATION" },
+    { "name": "metric-overflows-to-infinity", "set": { "/events/0/metrics/networkRxBytesPerSec": "NUMBER:1e400" }, "expect": "SEMANTIC", "code": "SEMANTIC_VIOLATION" },
     { "name": "timestamp-too-old",         "set": { "/events/0/timestamp": "RELATIVE:-25h" },          "expect": "SEMANTIC", "code": "TIMESTAMP_OUT_OF_RANGE" },
     { "name": "timestamp-in-the-future",   "set": { "/events/0/timestamp": "RELATIVE:+10m" },          "expect": "SEMANTIC", "code": "TIMESTAMP_OUT_OF_RANGE" }
   ],
   "notes": [
     "A value of the form RELATIVE:<+|-><n><h|m> means 'now plus/minus that amount, in UTC'. The valid example has a fixed 2026 timestamp, so tests that check the 24 h / 5 min window must first set the timestamp relative to the current time.",
+    "A value of the form NUMBER:<literal> means 'this JSON number literal', e.g. NUMBER:1e400: a number too large for a 64-bit float, which JSON parsers turn into Infinity. It cannot be written as a plain number in this file without the test tools changing it.",
+    "Patterns follow ECMA-262 as JSON Schema requires: '$' matches only at the very end, so a trailing newline breaks '^...$'. Python's re and Java's java.util.regex let it through by default; both test validators and the gateway translate '$' to the true end of input.",
     "DUPLICATE_EVENT_ID and SERVICE_NOT_PERMITTED need more than one event or an agent registry, so they are covered by the gateway tests (stage 2), not by this file."
   ]
 }

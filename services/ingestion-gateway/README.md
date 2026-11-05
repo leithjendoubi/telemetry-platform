@@ -35,7 +35,10 @@ Probes: `GET /health/live`, `GET /health/ready`.
 Rate limits are per gateway instance (ADR-0009). Change an agent's limit (takes effect within 10 s):
 `docker exec telemetry-timescaledb psql -U ingestion -d ingestion_db -c "UPDATE agent SET rate_limit_rps = 5, burst = 10 WHERE agent_id = 'agent-cart-api';"`
 
-**Not yet (week 5 plan in CLAUDE.md):** full sanitisation (A5),
+Sanitisation (FR-ING-04, ADR-0010): identifier patterns read `$` as the true end of text (no trailing newline), metrics
+too large for a 64-bit number (e.g. `1e400`) are rejected, and accepted events reach Kafka with their timestamp in UTC.
+
+**Not yet (week 5 plan in CLAUDE.md):**
 BlockHound (A6), gzip (A7), Prometheus `/metrics` and OpenTelemetry `traceparent` (B1, B2), Kafka check in readiness.
 
 ## API keys: the agent registry (ADR-0008)

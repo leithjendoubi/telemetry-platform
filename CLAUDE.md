@@ -212,6 +212,10 @@ Progress:
   the same limits), `InFlightLimitIT` (socket holds a request); 54 unit + 37 IT green; planted bugs caught (one bucket
   for all agents, slot never released, Retry-After rounded down). Buckets are per gateway instance (shared store
   needed before scaling out). Open point: spec 6.8 says producer timeout 2 s, the gateway uses delivery.timeout.ms 10 s.
+- A5 done 2026-11-05: sanitisation gaps found and fixed (ADR-0010): trailing newline passed identifier patterns
+  (Java and Python `$`; fixed by reading `$` as end of text in both), `1e400` became `"Infinity"` in Kafka (new
+  SEMANTIC_VIOLATION rule), offset timestamps passed unchanged (now UTC in the raw record). 6 new contract cases,
+  marker `NUMBER:<literal>`; 64 unit + 44 IT green; planted bugs caught.
 - Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)

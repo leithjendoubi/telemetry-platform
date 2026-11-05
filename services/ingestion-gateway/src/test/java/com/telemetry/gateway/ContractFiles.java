@@ -4,14 +4,17 @@ import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.DecimalNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SchemaValidatorsConfig;
 import com.networknt.schema.SpecVersion;
+import com.telemetry.gateway.validation.EcmaRegularExpressionFactory;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
@@ -76,6 +79,7 @@ public final class ContractFiles {
                             in,
                             SchemaValidatorsConfig.builder()
                                     .formatAssertionsEnabled(true)
+                                    .regularExpressionFactory(EcmaRegularExpressionFactory.INSTANCE)
                                     .build());
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -134,10 +138,17 @@ public final class ContractFiles {
         }
     }
 
-    /** "RELATIVE:-25h" means now minus 25 hours (see the notes in invalid-cases.json). */
+    /**
+     * "RELATIVE:-25h" means now minus 25 hours; "NUMBER:1e400" means that JSON number literal, kept exact as a
+     * DecimalNode, so it is written as 1E+400 and parsed by the gateway like a real agent's input (notes of
+     * invalid-cases.json).
+     */
     private static JsonNode resolveRelative(JsonNode value, Instant now) {
         if (!value.isTextual()) {
             return value;
+        }
+        if (value.asText().startsWith("NUMBER:")) {
+            return DecimalNode.valueOf(new BigDecimal(value.asText().substring("NUMBER:".length())));
         }
         Matcher m = RELATIVE.matcher(value.asText());
         if (!m.matches()) {
