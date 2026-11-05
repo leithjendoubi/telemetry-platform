@@ -134,7 +134,7 @@ jobs:
         run: |
           docker save telemetry/${{ matrix.service }}:ci -o image.tar
           docker run --rm -v "$PWD:/scan" aquasec/trivy:0.76.1 image --input /scan/image.tar \
-            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --ignorefile /scan/.trivyignore.yaml
 
   integration-tests:
     name: "5. Integration tests"

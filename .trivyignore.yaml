@@ -1,0 +1,29 @@
+# Accepted image-scan findings (Trivy, CI stage 4). Decision and reasons: docs/adr/0006-accepted-spring-6-cves.md.
+# Every entry is limited to one CVE in one exact package version and expires: after expired_at, or after a version
+# change, Trivy reports it again and CI turns red, so the decision is looked at again.
+# Guard: the ArchUnit rule NO_SPRING_FEATURES_OF_ACCEPTED_CVES in both Java services fails the build if our code
+# starts using an affected feature.
+
+vulnerabilities:
+  - id: CVE-2026-47884
+    purls:
+      - pkg:maven/org.springframework/spring-webmvc@6.2.19
+    statement: >-
+      RCE via XsltView. Fixed only in Spring Framework 7 (Spring Boot 4, outside spec 6.5). No XsltView is used;
+      ArchUnit forbids org.springframework.web.servlet.view.xslt.
+    expired_at: 2026-12-31
+  - id: CVE-2026-47890
+    purls:
+      - pkg:maven/org.springframework/spring-webmvc@6.2.19
+      - pkg:maven/org.springframework/spring-webflux@6.2.19
+    statement: >-
+      SSE stream corruption with view fragments. Fixed only in Spring Framework 7. No view fragments are used;
+      ArchUnit forbids Fragment / FragmentsRendering.
+    expired_at: 2026-12-31
+  - id: CVE-2026-47892
+    purls:
+      - pkg:maven/org.springframework/spring-webflux@6.2.19
+    statement: >-
+      Header predicate bypass in WebFlux functional endpoints. Fixed only in Spring Framework 7. Only annotated
+      controllers are used; ArchUnit forbids org.springframework.web.reactive.function.server.
+    expired_at: 2026-12-31

@@ -1,5 +1,6 @@
 package com.telemetry.gateway;
 
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
@@ -48,4 +49,17 @@ class ArchitectureTest {
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("..gateway.api..", "org.springframework.web..", "org.springframework.http..");
+
+    /**
+     * Keeps the exception in .trivyignore.yaml true: CVE-2026-47884, -47890 and -47892 of Spring Framework 6.2
+     * (fixed only in 7.x) need XSLT views, view fragments or WebFlux functional endpoints. Same rule in
+     * analytics-service. See docs/adr/0006-accepted-spring-6-cves.md before changing it.
+     */
+    @ArchTest
+    static final ArchRule NO_SPRING_FEATURES_OF_ACCEPTED_CVES = noClasses()
+            .should()
+            .dependOnClassesThat(nameMatching("org\\.springframework\\.web\\.reactive\\.function\\.server\\..*"
+                    + "|org\\.springframework\\.web\\.servlet\\.view\\.xslt\\..*"
+                    + "|org\\.springframework\\.web\\..*\\.Fragment(sRendering)?(\\$.*)?"))
+            .because("the CVEs accepted in .trivyignore.yaml are only harmless while these features are unused");
 }
