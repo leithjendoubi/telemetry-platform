@@ -5,26 +5,20 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.7</version>
-        <relativePath/>
+        <groupId>com.telemetry</groupId>
+        <artifactId>telemetry-platform-parent</artifactId>
+        <version>0.1.0</version>
+        <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <groupId>com.telemetry</groupId>
     <artifactId>ingestion-gateway</artifactId>
-    <version>0.1.0</version>
     <name>ingestion-gateway</name>
     <description>Ingestion gateway: POST /api/v1/telemetry/ingest, validation, publish to telemetry.raw.v1 (spec 8.1, FR-ING)</description>
 
     <properties>
-        <java.version>21</java.version>
-        <reactor-kafka.version>1.3.23</reactor-kafka.version>
-        <json-schema-validator.version>1.5.6</json-schema-validator.version>
-        <!-- 1.21.3 (Boot 3.5.7 default) cannot talk to Docker Engine 29+; 1.21.4 can -->
-        <testcontainers.version>1.21.4</testcontainers.version>
+        <checkstyle.skip>false</checkstyle.skip>
         <!-- shared contracts (spec 7.1): copied into the jar, never duplicated by hand -->
-        <contracts.dir>${project.basedir}/../../libs/telemetry-contracts</contracts.dir>
+        <contracts.dir>${repo.root}/libs/telemetry-contracts</contracts.dir>
     </properties>
 
     <dependencies>
@@ -39,12 +33,10 @@
         <dependency>
             <groupId>io.projectreactor.kafka</groupId>
             <artifactId>reactor-kafka</artifactId>
-            <version>${reactor-kafka.version}</version>
         </dependency>
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
-            <version>${json-schema-validator.version}</version>
         </dependency>
 
         <dependency>
@@ -72,6 +64,11 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -97,6 +94,27 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- quality tooling, configured once in the parent POM -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
             </plugin>
         </plugins>
     </build>

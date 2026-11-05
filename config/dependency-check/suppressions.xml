@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP Dependency-Check suppressions (spec 14.4 stage 3). Every entry must say why the finding does not apply
+  and carry an expiry date, so accepted risks are reviewed again (spec D-09 "accepted residual risks").
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+</suppressions>

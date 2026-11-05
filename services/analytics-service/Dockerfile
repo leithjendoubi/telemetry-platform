@@ -6,6 +6,7 @@
 
 FROM maven:3.9.16-eclipse-temurin-21 AS build
 WORKDIR /src
+COPY pom.xml pom.xml
 COPY libs/telemetry-contracts libs/telemetry-contracts
 COPY services/analytics-service/pom.xml services/analytics-service/pom.xml
 RUN --mount=type=cache,target=/root/.m2 mvn -B -q -f services/analytics-service/pom.xml dependency:go-offline
