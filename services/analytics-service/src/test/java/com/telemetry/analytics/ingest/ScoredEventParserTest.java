@@ -3,16 +3,15 @@ package com.telemetry.analytics.ingest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.telemetry.analytics.ingest.ScoredEventParser.PoisonRecordException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.function.Consumer;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.telemetry.analytics.ingest.ScoredEventParser.PoisonRecordException;
 import org.junit.jupiter.api.Test;
 
 public class ScoredEventParserTest {
@@ -22,7 +21,9 @@ public class ScoredEventParserTest {
 
     /** libs/telemetry-contracts/examples/scored-event.json, the same file the detection stub tests against. */
     public static ObjectNode example() {
-        try (InputStream in = ScoredEventParserTest.class.getClassLoader().getResourceAsStream("contracts/examples/scored-event.json")) {
+        try (InputStream in = ScoredEventParserTest.class
+                .getClassLoader()
+                .getResourceAsStream("contracts/examples/scored-event.json")) {
             return (ObjectNode) MAPPER.readTree(in);
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -66,7 +67,11 @@ public class ScoredEventParserTest {
     @Test
     void predictionFieldsComeFromThePredictionObject() {
         ObjectNode e = example();
-        ((ObjectNode) e.get("prediction")).put("probability", 0.93).put("isAnomaly", true).put("warmup", true).put("modelVersion", "rf-1.2.0");
+        ((ObjectNode) e.get("prediction"))
+                .put("probability", 0.93)
+                .put("isAnomaly", true)
+                .put("warmup", true)
+                .put("modelVersion", "rf-1.2.0");
         TelemetryRow row = parser.parse(bytes(e));
         assertThat(row.anomalyProb()).isEqualTo(0.93);
         assertThat(row.isAnomaly()).isTrue();
@@ -76,9 +81,12 @@ public class ScoredEventParserTest {
 
     @Test
     void unreadableValuesArePoison() {
-        assertThatThrownBy(() -> parser.parse(null)).isInstanceOf(PoisonRecordException.class).hasMessageContaining("empty");
+        assertThatThrownBy(() -> parser.parse(null))
+                .isInstanceOf(PoisonRecordException.class)
+                .hasMessageContaining("empty");
         assertThatThrownBy(() -> parser.parse("{oops".getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(PoisonRecordException.class).hasMessageContaining("not JSON");
+                .isInstanceOf(PoisonRecordException.class)
+                .hasMessageContaining("not JSON");
     }
 
     @Test
@@ -98,7 +106,10 @@ public class ScoredEventParserTest {
     @Test
     void valuesTooLargeForTheColumnsArePoison() {
         assertPoison(e -> ((ObjectNode) e.get("metrics")).put("activeThreadCount", 3_000_000_000L), "integer column");
-        assertPoison(e -> ((ObjectNode) e.get("metrics")).put("memoryUsedBytes", new java.math.BigInteger("99999999999999999999")), "bigint column");
+        assertPoison(
+                e -> ((ObjectNode) e.get("metrics"))
+                        .put("memoryUsedBytes", new java.math.BigInteger("99999999999999999999")),
+                "bigint column");
     }
 
     private void assertPoison(Consumer<ObjectNode> change) {
@@ -108,6 +119,8 @@ public class ScoredEventParserTest {
     private void assertPoison(Consumer<ObjectNode> change, String message) {
         ObjectNode e = example();
         change.accept(e);
-        assertThatThrownBy(() -> parser.parse(bytes(e))).isInstanceOf(PoisonRecordException.class).hasMessageContaining(message);
+        assertThatThrownBy(() -> parser.parse(bytes(e)))
+                .isInstanceOf(PoisonRecordException.class)
+                .hasMessageContaining(message);
     }
 }

@@ -4,7 +4,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -30,8 +29,7 @@ public class SeriesRepository {
             Map.entry("httpLatencyP95Ms", "http_p95_ms"),
             Map.entry("gcPauseMsPerMin", "gc_pause_ms_min"));
 
-    public record Point(Instant time, double value, double anomalyProb, boolean isAnomaly) {
-    }
+    public record Point(Instant time, double value, double anomalyProb, boolean isAnomaly) {}
 
     private final JdbcTemplate jdbc;
 
@@ -47,8 +45,13 @@ public class SeriesRepository {
         }
         String sql = "SELECT event_time, " + column + " AS value, anomaly_prob, is_anomaly FROM telemetry_event"
                 + " WHERE instance_id = ? AND event_time >= ? AND event_time < ? ORDER BY event_time LIMIT ?";
-        return jdbc.query(sql, (rs, i) -> new Point(
-                        rs.getTimestamp(1).toInstant(), rs.getDouble(2), rs.getDouble(3), rs.getBoolean(4)),
-                instanceId, Timestamp.from(from), Timestamp.from(to), limit);
+        return jdbc.query(
+                sql,
+                (rs, i) ->
+                        new Point(rs.getTimestamp(1).toInstant(), rs.getDouble(2), rs.getDouble(3), rs.getBoolean(4)),
+                instanceId,
+                Timestamp.from(from),
+                Timestamp.from(to),
+                limit);
     }
 }

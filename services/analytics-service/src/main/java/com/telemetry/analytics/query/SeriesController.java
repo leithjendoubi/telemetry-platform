@@ -1,13 +1,12 @@
 package com.telemetry.analytics.query;
 
+import com.telemetry.analytics.query.SeriesRepository.Point;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.regex.Pattern;
-
-import com.telemetry.analytics.query.SeriesRepository.Point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,25 +34,30 @@ public class SeriesController {
     private final int maxPoints;
     private final Duration maxWindow;
 
-    public SeriesController(SeriesRepository repository,
-                            @Value("${analytics.max-points}") int maxPoints,
-                            @Value("${analytics.max-window}") Duration maxWindow) {
+    public SeriesController(
+            SeriesRepository repository,
+            @Value("${analytics.max-points}") int maxPoints,
+            @Value("${analytics.max-window}") Duration maxWindow) {
         this.repository = repository;
         this.maxPoints = maxPoints;
         this.maxWindow = maxWindow;
     }
 
-    public record Series(String instanceId, String metric, Instant from, Instant to, boolean truncated, List<Point> points) {
-    }
+    public record Series(
+            String instanceId, String metric, Instant from, Instant to, boolean truncated, List<Point> points) {}
 
     @GetMapping("/api/v1/analytics/instances/{instanceId}/series")
-    public Series instanceSeries(@PathVariable String instanceId, @RequestParam String metric,
-                                 @RequestParam String from, @RequestParam String to) {
+    public Series instanceSeries(
+            @PathVariable String instanceId,
+            @RequestParam String metric,
+            @RequestParam String from,
+            @RequestParam String to) {
         if (!IDENTIFIER.matcher(instanceId).matches()) {
             throw badRequest("instanceId does not match the identifier pattern");
         }
         if (!SeriesRepository.METRIC_COLUMNS.containsKey(metric)) {
-            throw badRequest("unknown metric '" + metric + "'; allowed: " + SeriesRepository.METRIC_COLUMNS.keySet().stream().sorted().toList());
+            throw badRequest("unknown metric '" + metric + "'; allowed: "
+                    + SeriesRepository.METRIC_COLUMNS.keySet().stream().sorted().toList());
         }
         Instant start = instant("from", from);
         Instant end = instant("to", to);
@@ -73,7 +77,8 @@ public class SeriesController {
     @ExceptionHandler(DataAccessException.class)
     ProblemDetail databaseUnavailable(DataAccessException e) {
         log.warn("query failed: {}", e.getMostSpecificCause().toString());
-        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, "The database is unavailable, retry later");
+        return ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, "The database is unavailable, retry later");
     }
 
     private static Instant instant(String name, String value) {
@@ -85,6 +90,7 @@ public class SeriesController {
     }
 
     private static ErrorResponseException badRequest(String detail) {
-        return new ErrorResponseException(HttpStatus.BAD_REQUEST, ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail), null);
+        return new ErrorResponseException(
+                HttpStatus.BAD_REQUEST, ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail), null);
     }
 }

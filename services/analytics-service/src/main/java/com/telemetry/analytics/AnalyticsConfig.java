@@ -27,10 +27,12 @@ public class AnalyticsConfig {
     }
 
     @Bean
-    ScoredEventListener scoredEventListener(ScoredEventParser parser, TelemetryEventWriter writer,
-                                            KafkaTemplate<byte[], byte[]> dlqTemplate,
-                                            @Value("${analytics.kafka.dlq-topic}") String dlqTopic,
-                                            @Value("${spring.application.name}/${analytics.version}") String producerName) {
+    ScoredEventListener scoredEventListener(
+            ScoredEventParser parser,
+            TelemetryEventWriter writer,
+            KafkaTemplate<byte[], byte[]> dlqTemplate,
+            @Value("${analytics.kafka.dlq-topic}") String dlqTopic,
+            @Value("${spring.application.name}/${analytics.version}") String producerName) {
         return new ScoredEventListener(parser, writer, dlqTemplate, dlqTopic, producerName);
     }
 

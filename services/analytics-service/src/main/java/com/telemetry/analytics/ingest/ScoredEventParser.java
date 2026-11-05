@@ -1,13 +1,5 @@
 package com.telemetry.analytics.ingest;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeParseException;
-import java.util.Comparator;
-import java.util.List;
-import java.util.UUID;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
@@ -16,6 +8,13 @@ import com.networknt.schema.PathType;
 import com.networknt.schema.SchemaValidatorsConfig;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Turns one telemetry.scored.v1 value into one {@link TelemetryRow}.
@@ -41,7 +40,8 @@ public class ScoredEventParser {
             if (in == null) {
                 throw new IllegalStateException(SCHEMA_RESOURCE + " is not on the classpath (see pom.xml resources)");
             }
-            this.schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(in, config);
+            this.schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+                    .getSchema(in, config);
         } catch (IOException e) {
             throw new IllegalStateException("cannot read " + SCHEMA_RESOURCE, e);
         }
@@ -59,9 +59,11 @@ public class ScoredEventParser {
             throw new PoisonRecordException("not JSON: " + ex.getMessage());
         }
         List<ValidationMessage> errors = schema.validate(e).stream()
-                .sorted(Comparator.comparing(m -> m.getInstanceLocation().toString())).toList();
+                .sorted(Comparator.comparing(m -> m.getInstanceLocation().toString()))
+                .toList();
         if (!errors.isEmpty()) {
-            throw new PoisonRecordException("not a telemetry-scored-event 1.0 record: " + errors.get(0).getMessage());
+            throw new PoisonRecordException(
+                    "not a telemetry-scored-event 1.0 record: " + errors.get(0).getMessage());
         }
 
         JsonNode r = e.get("resource");
@@ -98,7 +100,8 @@ public class ScoredEventParser {
         try {
             return OffsetDateTime.parse(node.get(field).asText());
         } catch (DateTimeParseException ex) {
-            throw new PoisonRecordException(field + " cannot be parsed: " + node.get(field).asText());
+            throw new PoisonRecordException(
+                    field + " cannot be parsed: " + node.get(field).asText());
         }
     }
 

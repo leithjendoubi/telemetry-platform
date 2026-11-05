@@ -1,12 +1,11 @@
 package com.telemetry.analytics.ingest;
 
+import com.telemetry.analytics.ingest.ScoredEventParser.PoisonRecordException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-
-import com.telemetry.analytics.ingest.ScoredEventParser.PoisonRecordException;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
@@ -47,8 +46,12 @@ public class ScoredEventListener {
     private final AtomicLong batches = new AtomicLong();
     private long lastLoggedConsumed = -1;
 
-    public ScoredEventListener(ScoredEventParser parser, TelemetryEventWriter writer, KafkaTemplate<byte[], byte[]> dlqTemplate,
-                               String dlqTopic, String producerName) {
+    public ScoredEventListener(
+            ScoredEventParser parser,
+            TelemetryEventWriter writer,
+            KafkaTemplate<byte[], byte[]> dlqTemplate,
+            String dlqTopic,
+            String producerName) {
         this.parser = parser;
         this.writer = writer;
         this.dlqTemplate = dlqTemplate;
@@ -75,20 +78,37 @@ public class ScoredEventListener {
         duplicates.addAndGet(rows.size() - fresh);
         deadLettered.addAndGet(poison);
         batches.incrementAndGet();
-        log.debug("batch of {}: {} inserted, {} duplicates, {} dead-lettered", records.size(), fresh, rows.size() - fresh, poison);
+        log.debug(
+                "batch of {}: {} inserted, {} duplicates, {} dead-lettered",
+                records.size(),
+                fresh,
+                rows.size() - fresh,
+                poison);
     }
 
     private void deadLetter(ConsumerRecord<String, byte[]> record, String reason) throws Exception {
-        log.warn("poison record {}[{}]@{} -> {}: {}", record.topic(), record.partition(), record.offset(), dlqTopic, reason);
-        ProducerRecord<byte[], byte[]> out = new ProducerRecord<>(dlqTopic, null,
-                record.key() == null ? null : record.key().getBytes(StandardCharsets.UTF_8), record.value());
+        log.warn(
+                "poison record {}[{}]@{} -> {}: {}",
+                record.topic(),
+                record.partition(),
+                record.offset(),
+                dlqTopic,
+                reason);
+        ProducerRecord<byte[], byte[]> out = new ProducerRecord<>(
+                dlqTopic,
+                null,
+                record.key() == null ? null : record.key().getBytes(StandardCharsets.UTF_8),
+                record.value());
         for (Header h : record.headers()) {
             out.headers().add(h);
         }
         out.headers().add("dlq-error", reason.getBytes(StandardCharsets.UTF_8));
         out.headers().add("dlq-attempts", "1".getBytes(StandardCharsets.UTF_8));
         out.headers().add("dlq-source-topic", record.topic().getBytes(StandardCharsets.UTF_8));
-        out.headers().add("dlq-source-partition", Integer.toString(record.partition()).getBytes(StandardCharsets.UTF_8));
+        out.headers()
+                .add(
+                        "dlq-source-partition",
+                        Integer.toString(record.partition()).getBytes(StandardCharsets.UTF_8));
         out.headers().add("dlq-source-offset", Long.toString(record.offset()).getBytes(StandardCharsets.UTF_8));
         out.headers().add("producer", producerName.getBytes(StandardCharsets.UTF_8));
         dlqTemplate.send(out).get(10, TimeUnit.SECONDS); // must be stored before the offsets are committed
@@ -99,8 +119,13 @@ public class ScoredEventListener {
     void logStats() {
         long now = consumed.get();
         if (now != lastLoggedConsumed) {
-            log.info("stats consumed={} inserted={} duplicates={} dead_lettered={} batches={}",
-                    now, inserted.get(), duplicates.get(), deadLettered.get(), batches.get());
+            log.info(
+                    "stats consumed={} inserted={} duplicates={} dead_lettered={} batches={}",
+                    now,
+                    inserted.get(),
+                    duplicates.get(),
+                    deadLettered.get(),
+                    batches.get());
             lastLoggedConsumed = now;
         }
     }

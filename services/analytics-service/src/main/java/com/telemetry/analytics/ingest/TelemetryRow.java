@@ -28,5 +28,4 @@ public record TelemetryRow(
         double anomalyProb,
         boolean isAnomaly,
         boolean isWarmup,
-        String modelVersion) {
-}
+        String modelVersion) {}
