@@ -27,6 +27,14 @@
    independent of test order. A fresh JVM per test class (`reuseForks=false`) was tried and dropped: Failsafe then
    failed in the Maven process itself.
 
+4. **One allowance, found by CI on Linux** (`BlockHoundAllowances`, registered in `META-INF/services`): when R2DBC opens
+   a new database connection, PostgreSQL's SCRAM-SHA-256 login asks `SecureRandom` for a nonce, and on Linux the
+   default `NativePRNG` reads it from `/dev/urandom` on the Netty thread. Windows uses an OS call, so it never showed
+   locally. The read never waits and happens only when the pool opens a connection; replacing the JVM-wide random
+   source would change security behaviour for the whole application. So blocking is allowed inside exactly one
+   method, `com.ongres.scram.common.util.CryptoUtil.nonce`. `BlockHoundIsActiveTest` proves the allowance is loaded and
+   covers only that method (the same slow random source used elsewhere is still reported).
+
 ## Consequences
 
 Any new blocking call on an event-loop thread fails the test that triggers it. Libraries that do lazy I/O on first
