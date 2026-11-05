@@ -3,10 +3,14 @@ package com.telemetry.gateway.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Ticker;
 import com.telemetry.gateway.publish.EventPublisher;
+import com.telemetry.gateway.ratelimit.AgentRateLimiter;
+import com.telemetry.gateway.ratelimit.InFlightLimiter;
 import com.telemetry.gateway.registry.AgentRegistry;
 import com.telemetry.gateway.registry.R2dbcAgentLookup;
 import com.telemetry.gateway.validation.BatchValidator;
+import io.github.bucket4j.TimeMeter;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -37,6 +41,17 @@ public class GatewayConfig {
                 settings.cacheTtl(),
                 settings.cacheMaxSize(),
                 Ticker.systemTicker());
+    }
+
+    /** Per-agent token buckets (FR-ING-06); idle buckets go after 10 min, at most 10,000 agents. */
+    @Bean
+    AgentRateLimiter agentRateLimiter() {
+        return new AgentRateLimiter(Duration.ofMinutes(10), 10_000, TimeMeter.SYSTEM_NANOTIME);
+    }
+
+    @Bean
+    InFlightLimiter inFlightLimiter(GatewayProperties props) {
+        return new InFlightLimiter(props.maxInFlight());
     }
 
     @Bean

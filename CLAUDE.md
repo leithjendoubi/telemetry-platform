@@ -36,6 +36,11 @@ Key spec sections: 6.5 technology stack, 8.1 ingest contract, 8.2 query API, 8.3
   Everything else stays: contracts first, planted bugs, ADRs, simple explanations after each step.
 - Decisions that are Leith's or the supervisor's (accepting a risk, changing the spec stack, making the repository
   public) are asked, never recorded in his name without his answer.
+- Leith, 2026-11-05: "do your recommendations always, don't wait for my confirmations". Act on your own
+  recommendations and report afterwards; only the decisions of the bullet above still wait for his answer.
+- Memory: the machine has 16 GB and runs low when the compose stack and the Testcontainers tests run together
+  (a test run was stopped for low memory on 2026-11-05). Before `mvn verify` of a Java service, stop the stack with
+  `docker compose -f infra/compose/docker-compose.yml --profile core down` (keeps the data) and start it again after.
 
 ## Machine setup (verified 2026-10-14)
 - Windows, PowerShell, Docker Desktop (must show "Engine running" before docker commands).
@@ -201,11 +206,12 @@ Progress:
   (WinError 10053) because the gateway closed before the body arrived: fixed by draining the body first (socket test).
   Note: the local broker had lost its topics (only `__consumer_offsets`); the gateway then answers 503 and logs
   `UNKNOWN_TOPIC_OR_PARTITION`. Fix: run `kafka-init` (Commands).
-- A4 started 2026-11-05: simulator now treats Retry-After as a minimum (jitter used to shorten it to as little as
-  half; test proves it). NOT done yet: Bucket4j per-agent bucket from `agent.rate_limit_rps`/`burst` -> 429 +
-  Retry-After; global in-flight limit **2,000** (spec 6.8 line "Max in-flight requests") -> 503 + Retry-After
-  (drain the body like other early answers); AT-04 integration test; in-flight test via a socket that holds a request.
-  Open point for later: spec 6.8 says producer timeout 2 s, the gateway uses delivery.timeout.ms 10 s.
+- A4 done 2026-11-05: package `ratelimit`: Bucket4j 8.21.0 token bucket per agent from `agent.rate_limit_rps`/`burst`
+  -> 429 + Retry-After (rounded up); global in-flight cap 2,000 (spec 6.8) -> 503 + Retry-After, not drained under
+  overload (ADR-0009). Simulator treats Retry-After as a minimum. AT-04 integration test (incl. a neighbour agent with
+  the same limits), `InFlightLimitIT` (socket holds a request); 54 unit + 37 IT green; planted bugs caught (one bucket
+  for all agents, slot never released, Retry-After rounded down). Buckets are per gateway instance (shared store
+  needed before scaling out). Open point: spec 6.8 says producer timeout 2 s, the gateway uses delivery.timeout.ms 10 s.
 - Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)

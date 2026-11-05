@@ -15,6 +15,7 @@ import com.tngtech.archunit.lang.ArchRule;
  *   api  ──▶ auth, validation, publish, registry   (the HTTP adapter uses everything)
  *   publish ──▶ validation                    (the Kafka adapter sends accepted and rejected events)
  *   registry ──▶ auth                         (the database adapter returns agents)
+ *   ratelimit ──▶ auth                        (token buckets per agent, in-flight cap: no Spring, no Reactor)
  *   auth, validation                          (pure rules: no Spring, no Kafka, no HTTP)
  *   config ──▶ everything                     (wiring only)
  * </pre>
@@ -42,6 +43,22 @@ class ArchitectureTest {
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("..gateway.api..", "..gateway.publish..", "..gateway.registry..", "..gateway.config..");
+
+    @ArchTest
+    static final ArchRule RATE_LIMITS_ARE_FRAMEWORK_FREE = noClasses()
+            .that()
+            .resideInAPackage("..gateway.ratelimit..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAnyPackage(
+                    "org.springframework..",
+                    "reactor..",
+                    "org.apache.kafka..",
+                    "..gateway.api..",
+                    "..gateway.publish..",
+                    "..gateway.registry..",
+                    "..gateway.config..")
+            .because("the rate-limit policy (spec 7, RateLimitPolicy) must be testable without the web stack");
 
     @ArchTest
     static final ArchRule REGISTRY_DOES_NOT_KNOW_HTTP_OR_KAFKA = noClasses()

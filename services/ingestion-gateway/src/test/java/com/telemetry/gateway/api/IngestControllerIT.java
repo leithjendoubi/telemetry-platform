@@ -438,15 +438,68 @@ class IngestControllerIT {
         assertThat(last).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    /**
+     * AT-04 (spec 13.6): an agent over its quota gets 429 with Retry-After, and other agents are not affected.
+     * The test agent may send 1 request per second with a burst of 2 (columns rate_limit_rps and burst).
+     */
+    @Test
+    void at04AgentOverItsQuotaGets429OthersAreUnaffected() throws Exception {
+        String key = "test-key-" + UUID.randomUUID();
+        String limited = insertAgent(key, "ACTIVE", 1, 2);
+        // a neighbour with exactly the same limits: a bucket shared between agents would show here
+        String neighbourKey = "test-key-" + UUID.randomUUID();
+        String neighbour = insertAgent(neighbourKey, "ACTIVE", 1, 2);
+        long rawBefore = recordsInTopic();
+
+        post(batchOf(limited), key).exchange().expectStatus().isAccepted();
+        post(freshBatch(1), KEY).exchange().expectStatus().isAccepted(); // another agent, in between
+        post(batchOf(limited), key).exchange().expectStatus().isAccepted();
+        post(batchOf(limited), key)
+                .exchange()
+                .expectStatus()
+                .isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+                .expectHeader()
+                .valueEquals("Retry-After", "1")
+                .expectHeader()
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.detail")
+                .isEqualTo("Rate limit of this agent exceeded, retry later");
+        for (int i = 0; i < 3; i++) {
+            post(freshBatch(1), KEY).exchange().expectStatus().isAccepted(); // the other agent carries on
+        }
+        post(batchOf(neighbour), neighbourKey).exchange().expectStatus().isAccepted(); // its own full burst of 2
+        post(batchOf(neighbour), neighbourKey).exchange().expectStatus().isAccepted();
+        assertThat(recordsInTopic() - rawBefore)
+                .as("2 batches of the limited agent + 4 of checkout + 2 of the neighbour, none of the refused one")
+                .isEqualTo(8);
+
+        Thread.sleep(1100); // one token is back after 1 s at 1 request/s
+        post(batchOf(limited), key).exchange().expectStatus().isAccepted();
+    }
+
+    /** A valid one-event batch sent as {@code agentId}. */
+    static ObjectNode batchOf(String agentId) {
+        ObjectNode batch = freshBatch(1);
+        ((ObjectNode) batch.get("agent")).put("agentId", agentId);
+        return batch;
+    }
+
     /** A new agent for checkout-api with the given key and status; returns its agentId. */
     static String insertAgent(String apiKey, String status) {
+        return insertAgent(apiKey, status, 50, 100);
+    }
+
+    static String insertAgent(String apiKey, String status, int rateLimitRps, int burst) {
         String agentId = "agent-test-" + UUID.randomUUID().toString().substring(0, 8);
         TestDatabase.update(
-                "INSERT INTO agent (agent_id, display_name, api_key_hash, allowed_services, status)"
-                        + " VALUES (?, 'test agent', ?, ARRAY['checkout-api'], ?)",
+                "INSERT INTO agent (agent_id, display_name, api_key_hash, allowed_services, status, rate_limit_rps,"
+                        + " burst) VALUES (?, 'test agent', ?, ARRAY['checkout-api'], ?, ?, ?)",
                 agentId,
                 ApiKeyAuthenticator.sha256Hex(apiKey),
-                status);
+                status,
+                rateLimitRps,
+                burst);
         return agentId;
     }
 

@@ -69,7 +69,12 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
-        <!-- bounded, time-limited cache of agent lookups -->
+        <!-- per-agent token buckets (FR-ING-06) -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j_jdk17-core</artifactId>
+        </dependency>
+        <!-- bounded, time-limited cache of agent lookups (and of the rate-limit buckets) -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>

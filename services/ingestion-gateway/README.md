@@ -12,7 +12,9 @@ Java 21, Spring Boot 3.5 WebFlux, reactor-kafka, networknt json-schema-validator
 
 | Check | Answer |
 |-------|--------|
-| `X-API-Key` missing or unknown | 401 |
+| 2,000 requests already in progress (spec 6.8) | 503 with `Retry-After: 5` |
+| `X-API-Key` missing or unknown / of a revoked agent | 401 / 403 (agent database down: 503) |
+| agent over its own limit (token bucket: `rate_limit_rps`, `burst` of table `agent`, default 50/s, burst 100) | 429 with `Retry-After` |
 | `Content-Type` is not `application/json`, or a `Content-Encoding` is sent | 415 |
 | body larger than 256 KiB | 413 |
 | body is not JSON (NaN and Infinity are refused) | 400 |
@@ -30,7 +32,10 @@ and its README).
 
 Probes: `GET /health/live`, `GET /health/ready`.
 
-**Not yet (week 5 plan in CLAUDE.md):** rate limits (A4), full sanitisation (A5),
+Rate limits are per gateway instance (ADR-0009). Change an agent's limit (takes effect within 10 s):
+`docker exec telemetry-timescaledb psql -U ingestion -d ingestion_db -c "UPDATE agent SET rate_limit_rps = 5, burst = 10 WHERE agent_id = 'agent-cart-api';"`
+
+**Not yet (week 5 plan in CLAUDE.md):** full sanitisation (A5),
 BlockHound (A6), gzip (A7), Prometheus `/metrics` and OpenTelemetry `traceparent` (B1, B2), Kafka check in readiness.
 
 ## API keys: the agent registry (ADR-0008)
@@ -91,5 +96,8 @@ Settings can be changed with environment variables, e.g. `KAFKA_BOOTSTRAP_SERVER
 | `IngestControllerIT` (AT-03) | missing, wrong and revoked keys get 401/403 and publish nothing; a revocation takes effect within the cache time |
 | `KafkaUnavailableIT` | Kafka down gives 503 + `Retry-After`, never 202 |
 | `RegistryUnavailableIT` | database down gives 503 + `Retry-After`, never 401 |
+| `AgentRateLimiterTest`, `InFlightLimiterTest` | token buckets (burst, refill, Retry-After rounded up, agents independent, changed limits) and the in-flight cap under 64 threads |
+| `IngestControllerIT` (AT-04) | an agent over its quota gets 429 + `Retry-After`, publishes nothing, other agents carry on; it gets through again after 1 s |
+| `InFlightLimitIT` | with the cap at 1, a held request blocks the next one (503 + `Retry-After`); the slot is free again afterwards |
 
 Testcontainers must be 1.21.4 or newer (1.21.3 cannot talk to Docker Engine 29); Spring Boot 3.5.16 manages 1.21.4.

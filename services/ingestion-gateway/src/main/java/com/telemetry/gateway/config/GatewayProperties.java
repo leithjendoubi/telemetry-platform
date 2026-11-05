@@ -13,6 +13,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param maxEventAge   events older than this are rejected with TIMESTAMP_OUT_OF_RANGE (spec 8.1: 24 h)
  * @param maxClockSkew  events further in the future than this are rejected the same way (spec 8.1: 5 min)
  * @param retryAfter    value of the Retry-After header on 503 when Kafka or the agent registry cannot answer
+ * @param maxInFlight   requests in progress at most; more get 503 with Retry-After (FR-ING-06, spec 6.8: 2,000)
  * @param kafka         producer settings
  * @param registry      agent registry settings (agents live in ingestion_db, spec 8.4)
  */
@@ -23,6 +24,7 @@ public record GatewayProperties(
         @DefaultValue("24h") Duration maxEventAge,
         @DefaultValue("5m") Duration maxClockSkew,
         @DefaultValue("5s") Duration retryAfter,
+        @DefaultValue("2000") int maxInFlight,
         @DefaultValue Kafka kafka,
         @DefaultValue Registry registry) {
 

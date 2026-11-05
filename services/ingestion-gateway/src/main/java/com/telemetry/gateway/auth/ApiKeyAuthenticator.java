@@ -48,7 +48,8 @@ public final class ApiKeyAuthenticator {
         if (agent.status() != AgentStatus.ACTIVE) {
             return new AuthResult.Revoked(agent.agentId());
         }
-        return new AuthResult.Authenticated(new Agent(agent.agentId(), agent.allowedServices()));
+        return new AuthResult.Authenticated(
+                new Agent(agent.agentId(), agent.allowedServices(), agent.rateLimitRps(), agent.burst()));
     }
 
     public static String sha256Hex(String value) {

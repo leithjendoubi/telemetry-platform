@@ -28,6 +28,7 @@ gateway:
   max-event-age: 24h
   max-clock-skew: 5m
   retry-after: 5s
+  max-in-flight: 2000                     # spec 6.8; per-agent limits come from table agent (FR-ING-06)
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     raw-topic: telemetry.raw.v1

@@ -8,6 +8,9 @@ import com.telemetry.gateway.auth.ApiKeyAuthenticator;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator.AuthResult;
 import com.telemetry.gateway.config.GatewayProperties;
 import com.telemetry.gateway.publish.EventPublisher;
+import com.telemetry.gateway.ratelimit.AgentRateLimiter;
+import com.telemetry.gateway.ratelimit.AgentRateLimiter.Decision;
+import com.telemetry.gateway.ratelimit.InFlightLimiter;
 import com.telemetry.gateway.registry.AgentRegistry;
 import com.telemetry.gateway.validation.BatchValidator;
 import com.telemetry.gateway.validation.ValidationOutcome;
@@ -39,9 +42,11 @@ import reactor.core.publisher.Mono;
  *
  * <p>Checks run in this order, the first failure decides the answer:
  * <pre>
+ *  2,000 requests already in progress ...... 503 with Retry-After (FR-ING-06, spec 6.8)
  *  X-API-Key missing or unknown ............ 401   (agents: ingestion_db via AgentRegistry, 10 s cache)
  *  X-API-Key of a revoked agent ............ 403
  *  agent registry does not answer .......... 503 with Retry-After
+ *  agent over its own rate limit ........... 429 with Retry-After (token bucket from table agent, FR-ING-06)
  *  Content-Type not application/json ....... 415   (also Content-Encoding, until gzip arrives in week 5)
  *  body larger than 256 KiB ................ 413
  *  body is not JSON ........................ 400
@@ -63,6 +68,8 @@ public class IngestController {
     static final Duration DRAIN_TIMEOUT = Duration.ofSeconds(5);
 
     private final AgentRegistry registry;
+    private final AgentRateLimiter rateLimiter;
+    private final InFlightLimiter inFlight;
     private final BatchValidator validator;
     private final EventPublisher publisher;
     private final ObjectMapper mapper;
@@ -71,12 +78,16 @@ public class IngestController {
 
     public IngestController(
             AgentRegistry registry,
+            AgentRateLimiter rateLimiter,
+            InFlightLimiter inFlight,
             BatchValidator validator,
             EventPublisher publisher,
             ObjectMapper mapper,
             GatewayProperties props,
             Clock clock) {
         this.registry = registry;
+        this.rateLimiter = rateLimiter;
+        this.inFlight = inFlight;
         this.validator = validator;
         this.publisher = publisher;
         this.mapper = mapper;
@@ -89,9 +100,20 @@ public class IngestController {
 
     @PostMapping("/api/v1/telemetry/ingest")
     public Mono<ResponseEntity<Object>> ingest(ServerHttpRequest request) {
-        Instant receivedAt = clock.instant();
-        String requestId = request.getHeaders().getFirst(REQUEST_ID);
+        return Mono.defer(() -> {
+            String requestId = request.getHeaders().getFirst(REQUEST_ID);
+            if (!inFlight.tryAcquire()) {
+                // overload: answer at once, without reading the body (that would add load); a client that loses
+                // this answer sees a network error, which it retries like the 503 (spec 8.1)
+                return unavailable("Too many requests in progress, retry later", requestId);
+            }
+            // the slot is freed however the request ends: answer, error, or the client hanging up
+            return checkAgent(request, requestId).doFinally(signal -> inFlight.release());
+        });
+    }
 
+    private Mono<ResponseEntity<Object>> checkAgent(ServerHttpRequest request, String requestId) {
+        Instant receivedAt = clock.instant();
         Optional<String> keyHash =
                 ApiKeyAuthenticator.keyHash(request.getHeaders().getFirst("X-API-Key"));
         if (keyHash.isEmpty()) {
@@ -105,7 +127,12 @@ public class IngestController {
                         afterBody(request, problem(HttpStatus.UNAUTHORIZED, "Missing or invalid API key", requestId));
                     case AuthResult.Revoked revoked ->
                         afterBody(request, problem(HttpStatus.FORBIDDEN, "The API key has been revoked", requestId));
-                    case AuthResult.Authenticated ok -> authenticated(request, ok.agent(), receivedAt, requestId);
+                    case AuthResult.Authenticated ok ->
+                        switch (rateLimiter.tryAcquire(ok.agent())) {
+                            case Decision.Allowed allowed -> authenticated(request, ok.agent(), receivedAt, requestId);
+                            case Decision.Limited limited ->
+                                afterBody(request, tooManyRequests(limited.retryAfterSeconds(), requestId));
+                        };
                 })
                 .onErrorResume(RegistryUnavailable.class, e -> {
                     log.warn(
@@ -222,6 +249,16 @@ public class IngestController {
                             e.toString());
                     return unavailable("The event store is unavailable, retry later", requestId);
                 });
+    }
+
+    /** 429 with Retry-After (spec 8.1, FR-ING-06): this agent is over its own rate limit. */
+    private Mono<ResponseEntity<Object>> tooManyRequests(long retryAfterSeconds, String requestId) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+                HttpStatus.TOO_MANY_REQUESTS, "Rate limit of this agent exceeded, retry later");
+        return Mono.just(withRequestId(ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS), requestId)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds))
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(pd));
     }
 
     /** 503 with Retry-After (spec 8.1): the agent keeps the batch and sends it again later. */
