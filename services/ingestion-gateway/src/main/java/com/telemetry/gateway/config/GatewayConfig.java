@@ -1,13 +1,13 @@
 package com.telemetry.gateway.config;
 
-import java.time.Clock;
-import java.util.HashMap;
-import java.util.Map;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.telemetry.gateway.auth.AgentCredential;
 import com.telemetry.gateway.auth.ApiKeyAuthenticator;
 import com.telemetry.gateway.publish.RawEventPublisher;
 import com.telemetry.gateway.validation.BatchValidator;
+import java.time.Clock;
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -28,7 +28,9 @@ public class GatewayConfig {
 
     @Bean
     ApiKeyAuthenticator apiKeyAuthenticator(GatewayProperties props) {
-        return new ApiKeyAuthenticator(props.agents());
+        return new ApiKeyAuthenticator(props.agents().stream()
+                .map(a -> new AgentCredential(a.agentId(), a.apiKeySha256(), a.allowedServices()))
+                .toList());
     }
 
     @Bean
@@ -42,7 +44,8 @@ public class GatewayConfig {
      * agent should get 503 within seconds and retry later (spec 6.8), not wait the 2-minute client default.
      */
     @Bean(destroyMethod = "close")
-    KafkaSender<String, byte[]> kafkaSender(GatewayProperties props, @Value("${spring.application.name}") String appName) {
+    KafkaSender<String, byte[]> kafkaSender(
+            GatewayProperties props, @Value("${spring.application.name}") String appName) {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, props.kafka().bootstrapServers());
         config.put(ProducerConfig.CLIENT_ID_CONFIG, appName);
@@ -50,7 +53,9 @@ public class GatewayConfig {
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5); // highest value that keeps ordering with idempotence
+        config.put(
+                ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,
+                5); // highest value that keeps ordering with idempotence
         config.put(ProducerConfig.LINGER_MS_CONFIG, 5);
         config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "lz4");
         config.put(ProducerConfig.MAX_BLOCK_MS_CONFIG, 5_000);
@@ -61,9 +66,13 @@ public class GatewayConfig {
     }
 
     @Bean
-    RawEventPublisher rawEventPublisher(KafkaSender<String, byte[]> sender, ObjectMapper mapper, GatewayProperties props,
-                                        @Value("${spring.application.name}") String appName,
-                                        @Value("${gateway.version:0.1.0}") String version, Clock clock) {
+    RawEventPublisher rawEventPublisher(
+            KafkaSender<String, byte[]> sender,
+            ObjectMapper mapper,
+            GatewayProperties props,
+            @Value("${spring.application.name}") String appName,
+            @Value("${gateway.version:0.1.0}") String version,
+            Clock clock) {
         return new RawEventPublisher(sender, mapper, props.kafka().rawTopic(), appName + "/" + version, clock);
     }
 }

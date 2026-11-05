@@ -3,7 +3,6 @@ package com.telemetry.gateway.config;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -36,8 +35,7 @@ public record GatewayProperties(
     public record Kafka(
             @DefaultValue("localhost:9092") String bootstrapServers,
             @DefaultValue("telemetry.raw.v1") String rawTopic,
-            @DefaultValue Map<String, String> producer) {
-    }
+            @DefaultValue Map<String, String> producer) {}
 
     /**
      * One registered agent.
@@ -46,6 +44,5 @@ public record GatewayProperties(
      * @param apiKeySha256    SHA-256 of the API key, 64 hex characters. The key itself is never stored (FR-ING-05).
      * @param allowedServices serviceName values this agent may report on
      */
-    public record AgentEntry(String agentId, String apiKeySha256, List<String> allowedServices) {
-    }
+    public record AgentEntry(String agentId, String apiKeySha256, List<String> allowedServices) {}
 }

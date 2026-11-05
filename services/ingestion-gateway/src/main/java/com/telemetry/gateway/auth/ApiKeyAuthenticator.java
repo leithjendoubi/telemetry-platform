@@ -12,8 +12,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import com.telemetry.gateway.config.GatewayProperties.AgentEntry;
-
 /**
  * Checks the X-API-Key header (FR-ING-05, skeleton version).
  *
@@ -27,18 +25,23 @@ public class ApiKeyAuthenticator {
 
     private final Map<String, Agent> agentsByKeyHash = new HashMap<>();
 
-    public ApiKeyAuthenticator(List<AgentEntry> entries) {
-        for (AgentEntry entry : entries) {
-            String hash = entry.apiKeySha256() == null ? "" : entry.apiKeySha256().toLowerCase(Locale.ROOT);
+    public ApiKeyAuthenticator(List<AgentCredential> entries) {
+        for (AgentCredential entry : entries) {
+            String hash =
+                    entry.apiKeySha256() == null ? "" : entry.apiKeySha256().toLowerCase(Locale.ROOT);
             if (!SHA256_HEX.matcher(hash).matches()) {
-                throw new IllegalArgumentException("agent " + entry.agentId() + ": api-key-sha256 must be 64 hex characters");
+                throw new IllegalArgumentException(
+                        "agent " + entry.agentId() + ": api-key-sha256 must be 64 hex characters");
             }
-            if (entry.agentId() == null || entry.allowedServices() == null || entry.allowedServices().isEmpty()) {
+            if (entry.agentId() == null
+                    || entry.allowedServices() == null
+                    || entry.allowedServices().isEmpty()) {
                 throw new IllegalArgumentException("every agent needs an agent-id and at least one allowed service");
             }
             Agent previous = agentsByKeyHash.put(hash, new Agent(entry.agentId(), Set.copyOf(entry.allowedServices())));
             if (previous != null) {
-                throw new IllegalArgumentException("agents " + previous.agentId() + " and " + entry.agentId() + " share one API key");
+                throw new IllegalArgumentException(
+                        "agents " + previous.agentId() + " and " + entry.agentId() + " share one API key");
             }
         }
     }

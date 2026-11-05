@@ -1,11 +1,5 @@
 package com.telemetry.gateway.api;
 
-import java.io.IOException;
-import java.time.Clock;
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,6 +12,11 @@ import com.telemetry.gateway.validation.ValidationOutcome;
 import com.telemetry.gateway.validation.ValidationOutcome.Checked;
 import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
 import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
+import java.io.IOException;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBufferLimitException;
@@ -62,8 +61,13 @@ public class IngestController {
     private final GatewayProperties props;
     private final Clock clock;
 
-    public IngestController(ApiKeyAuthenticator authenticator, BatchValidator validator, RawEventPublisher publisher,
-                            ObjectMapper mapper, GatewayProperties props, Clock clock) {
+    public IngestController(
+            ApiKeyAuthenticator authenticator,
+            BatchValidator validator,
+            RawEventPublisher publisher,
+            ObjectMapper mapper,
+            GatewayProperties props,
+            Clock clock) {
         this.authenticator = authenticator;
         this.validator = validator;
         this.publisher = publisher;
@@ -73,8 +77,7 @@ public class IngestController {
     }
 
     /** The 202 body of spec 8.1. */
-    public record IngestResponse(String batchId, int accepted, int rejected, List<Rejection> rejections) {
-    }
+    public record IngestResponse(String batchId, int accepted, int rejected, List<Rejection> rejections) {}
 
     @PostMapping("/api/v1/telemetry/ingest")
     public Mono<ResponseEntity<Object>> ingest(ServerHttpRequest request) {
@@ -92,13 +95,17 @@ public class IngestController {
         }
         String encoding = headers.getFirst(HttpHeaders.CONTENT_ENCODING);
         if (encoding != null && !encoding.equalsIgnoreCase("identity")) {
-            return problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Encoding " + encoding + " is not supported yet", requestId);
+            return problem(
+                    HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "Content-Encoding " + encoding + " is not supported yet",
+                    requestId);
         }
         if (headers.getContentLength() > props.maxBodyBytes()) {
             return tooLarge(requestId);
         }
 
-        // read at most maxBodyBytes; a longer body (e.g. chunked, no Content-Length) fails with DataBufferLimitException
+        // read at most maxBodyBytes; a longer body (e.g. chunked, no Content-Length) fails with
+        // DataBufferLimitException
         return DataBufferUtils.join(request.getBody(), props.maxBodyBytes())
                 .map(buffer -> {
                     byte[] bytes = new byte[buffer.readableByteCount()];
@@ -125,12 +132,14 @@ public class IngestController {
         }
         JsonNode events = batch.path("events");
         if (events.isArray() && events.size() > props.maxEvents()) {
-            return problem(HttpStatus.PAYLOAD_TOO_LARGE, "A batch holds at most " + props.maxEvents() + " events", requestId);
+            return problem(
+                    HttpStatus.PAYLOAD_TOO_LARGE, "A batch holds at most " + props.maxEvents() + " events", requestId);
         }
 
         ValidationOutcome outcome = validator.validate(batch, agent.allowedServices());
         if (outcome instanceof EnvelopeInvalid invalid) {
-            ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "The batch envelope does not match schema 1.0");
+            ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+                    HttpStatus.BAD_REQUEST, "The batch envelope does not match schema 1.0");
             pd.setProperty("errors", invalid.errors());
             return respond(pd, requestId);
         }
@@ -141,25 +150,35 @@ public class IngestController {
 
         Checked checked = (Checked) outcome;
         String batchId = batch.get("batchId").asText();
-        IngestResponse response = new IngestResponse(batchId, checked.accepted().size(), checked.rejections().size(), checked.rejections());
+        IngestResponse response = new IngestResponse(
+                batchId, checked.accepted().size(), checked.rejections().size(), checked.rejections());
         if (checked.accepted().isEmpty()) {
             return Mono.just(withRequestId(ResponseEntity.accepted(), requestId).body(response));
         }
-        return publisher.publish(checked.accepted(), agent.agentId(), batchId, receivedAt)
-                .then(Mono.fromSupplier(() -> withRequestId(ResponseEntity.accepted(), requestId).body((Object) response)))
+        return publisher
+                .publish(checked.accepted(), agent.agentId(), batchId, receivedAt)
+                .then(Mono.fromSupplier(() ->
+                        withRequestId(ResponseEntity.accepted(), requestId).body((Object) response)))
                 .onErrorResume(e -> {
-                    log.warn("batch {} of {}: Kafka did not acknowledge, answering 503: {}", batchId, agent.agentId(), e.toString());
-                    ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
-                            "The event store is unavailable, retry later");
+                    log.warn(
+                            "batch {} of {}: Kafka did not acknowledge, answering 503: {}",
+                            batchId,
+                            agent.agentId(),
+                            e.toString());
+                    ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+                            HttpStatus.SERVICE_UNAVAILABLE, "The event store is unavailable, retry later");
                     return Mono.just(withRequestId(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE), requestId)
-                            .header(HttpHeaders.RETRY_AFTER, Long.toString(props.retryAfter().toSeconds()))
+                            .header(
+                                    HttpHeaders.RETRY_AFTER,
+                                    Long.toString(props.retryAfter().toSeconds()))
                             .contentType(MediaType.APPLICATION_PROBLEM_JSON)
                             .body(pd));
                 });
     }
 
     private Mono<ResponseEntity<Object>> tooLarge(String requestId) {
-        return problem(HttpStatus.PAYLOAD_TOO_LARGE, "Request body larger than " + props.maxBodyBytes() + " bytes", requestId);
+        return problem(
+                HttpStatus.PAYLOAD_TOO_LARGE, "Request body larger than " + props.maxBodyBytes() + " bytes", requestId);
     }
 
     private Mono<ResponseEntity<Object>> problem(HttpStatus status, String detail, String requestId) {

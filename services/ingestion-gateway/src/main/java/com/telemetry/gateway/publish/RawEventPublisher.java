@@ -1,16 +1,15 @@
 package com.telemetry.gateway.publish;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.time.Instant;
-import java.util.List;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.telemetry.gateway.validation.ValidationOutcome.AcceptedEvent;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import reactor.core.publisher.Flux;
@@ -36,8 +35,8 @@ public class RawEventPublisher {
     private final String producerName;
     private final Clock clock;
 
-    public RawEventPublisher(KafkaSender<String, byte[]> sender, ObjectMapper mapper, String topic,
-                             String producerName, Clock clock) {
+    public RawEventPublisher(
+            KafkaSender<String, byte[]> sender, ObjectMapper mapper, String topic, String producerName, Clock clock) {
         this.sender = sender;
         this.mapper = mapper;
         this.topic = topic;
@@ -48,24 +47,28 @@ public class RawEventPublisher {
     public Mono<Void> publish(List<AcceptedEvent> events, String agentId, String batchId, Instant receivedAt) {
         String receivedAtText = isoMillis(receivedAt);
         Flux<SenderRecord<String, byte[], Integer>> records = Flux.fromIterable(events)
-                .map(accepted -> SenderRecord.create(toRecord(accepted, agentId, batchId, receivedAtText), accepted.index()));
+                .map(accepted ->
+                        SenderRecord.create(toRecord(accepted, agentId, batchId, receivedAtText), accepted.index()));
         return sender.send(records)
                 .doOnNext(result -> {
                     if (result.exception() != null) {
-                        throw new PublishException("event " + result.correlationMetadata() + " not stored", result.exception());
+                        throw new PublishException(
+                                "event " + result.correlationMetadata() + " not stored", result.exception());
                     }
                 })
                 .then();
     }
 
-    private ProducerRecord<String, byte[]> toRecord(AcceptedEvent accepted, String agentId, String batchId, String receivedAt) {
+    private ProducerRecord<String, byte[]> toRecord(
+            AcceptedEvent accepted, String agentId, String batchId, String receivedAt) {
         ObjectNode value = accepted.event().deepCopy();
         value.put("receivedAt", receivedAt);
         value.put("agentId", agentId);
         value.put("batchId", batchId);
         String key = value.get("resource").get("instanceId").asText();
 
-        RecordHeaders headers = new RecordHeaders(); // envelope of spec 8.3; traceparent comes with OpenTelemetry (week 5)
+        RecordHeaders headers =
+                new RecordHeaders(); // envelope of spec 8.3; traceparent comes with OpenTelemetry (week 5)
         headers.add("event-type", bytes(EVENT_TYPE));
         headers.add("schema-version", bytes(SCHEMA_VERSION));
         headers.add("produced-at", bytes(isoMillis(clock.instant())));

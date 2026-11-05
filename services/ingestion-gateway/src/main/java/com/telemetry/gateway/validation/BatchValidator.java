@@ -1,5 +1,18 @@
 package com.telemetry.gateway.validation;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.networknt.schema.JsonNodePath;
+import com.networknt.schema.JsonSchema;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.PathType;
+import com.networknt.schema.SchemaValidatorsConfig;
+import com.networknt.schema.SpecVersion;
+import com.networknt.schema.ValidationMessage;
+import com.telemetry.gateway.validation.ValidationOutcome.AcceptedEvent;
+import com.telemetry.gateway.validation.ValidationOutcome.Checked;
+import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
+import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -15,20 +28,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonNodePath;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.PathType;
-import com.networknt.schema.SchemaValidatorsConfig;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
-import com.telemetry.gateway.validation.ValidationOutcome.AcceptedEvent;
-import com.telemetry.gateway.validation.ValidationOutcome.Checked;
-import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
-import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
 
 /**
  * Validates one ingest batch (FR-ING-03) in two layers:
@@ -57,14 +56,15 @@ public class BatchValidator {
         this.maxEventAge = maxEventAge;
         this.maxClockSkew = maxClockSkew;
         SchemaValidatorsConfig config = SchemaValidatorsConfig.builder()
-                .formatAssertionsEnabled(true)   // in draft 2020-12 "format" is only a hint unless switched on
+                .formatAssertionsEnabled(true) // in draft 2020-12 "format" is only a hint unless switched on
                 .pathType(PathType.JSON_POINTER) // error messages say /events/0/metrics/... like the contract tests
                 .build();
         try (InputStream in = BatchValidator.class.getClassLoader().getResourceAsStream(SCHEMA_RESOURCE)) {
             if (in == null) {
                 throw new IllegalStateException(SCHEMA_RESOURCE + " is not on the classpath (see pom.xml resources)");
             }
-            this.schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(in, config);
+            this.schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
+                    .getSchema(in, config);
         } catch (IOException e) {
             throw new IllegalStateException("cannot read " + SCHEMA_RESOURCE, e);
         }
@@ -99,7 +99,8 @@ public class BatchValidator {
         JsonNode events = batch.get("events");
         for (int i = 0; i < events.size(); i++) {
             JsonNode event = events.get(i);
-            String eventId = event.path("eventId").isTextual() ? event.get("eventId").asText() : null;
+            String eventId =
+                    event.path("eventId").isTextual() ? event.get("eventId").asText() : null;
 
             List<String> errors = eventErrors.get(i);
             if (errors != null) {
@@ -111,22 +112,32 @@ public class BatchValidator {
 
             String service = event.get("resource").get("serviceName").asText();
             if (!allowedServices.contains(service)) {
-                rejections.add(new Rejection(i, eventId, RejectionCode.SERVICE_NOT_PERMITTED,
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.SERVICE_NOT_PERMITTED,
                         "serviceName '" + service + "' is not in this agent's allow-list"));
                 continue;
             }
 
             Instant timestamp;
             try {
-                timestamp = OffsetDateTime.parse(event.get("timestamp").asText()).toInstant();
+                timestamp =
+                        OffsetDateTime.parse(event.get("timestamp").asText()).toInstant();
             } catch (DateTimeParseException e) {
                 // valid RFC 3339 that Java cannot read, e.g. a leap second "23:59:60"
-                rejections.add(new Rejection(i, eventId, RejectionCode.SCHEMA_VIOLATION,
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.SCHEMA_VIOLATION,
                         "/events/" + i + "/timestamp: cannot be parsed as an RFC 3339 date-time"));
                 continue;
             }
             if (timestamp.isBefore(oldest) || timestamp.isAfter(newest)) {
-                rejections.add(new Rejection(i, eventId, RejectionCode.TIMESTAMP_OUT_OF_RANGE,
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.TIMESTAMP_OUT_OF_RANGE,
                         "timestamp " + event.get("timestamp").asText() + " is outside [now - " + maxEventAge
                                 + ", now + " + maxClockSkew + "], now = " + now));
                 continue;
@@ -136,14 +147,20 @@ public class BatchValidator {
             BigDecimal used = metrics.get("memoryUsedBytes").decimalValue();
             BigDecimal limit = metrics.get("memoryLimitBytes").decimalValue();
             if (used.compareTo(limit) > 0) {
-                rejections.add(new Rejection(i, eventId, RejectionCode.SEMANTIC_VIOLATION,
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.SEMANTIC_VIOLATION,
                         "memoryUsedBytes (" + used + ") is greater than memoryLimitBytes (" + limit + ")"));
                 continue;
             }
 
             // UUIDs are compared case-insensitively; the first accepted copy wins
             if (!acceptedIds.add(eventId.toLowerCase(Locale.ROOT))) {
-                rejections.add(new Rejection(i, eventId, RejectionCode.DUPLICATE_EVENT_ID,
+                rejections.add(new Rejection(
+                        i,
+                        eventId,
+                        RejectionCode.DUPLICATE_EVENT_ID,
                         "eventId already used by an earlier event of this batch"));
                 continue;
             }

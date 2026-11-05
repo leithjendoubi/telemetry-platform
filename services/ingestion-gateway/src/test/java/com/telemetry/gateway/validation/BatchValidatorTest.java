@@ -2,14 +2,6 @@ package com.telemetry.gateway.validation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Stream;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -18,6 +10,13 @@ import com.telemetry.gateway.ContractFiles.InvalidCase;
 import com.telemetry.gateway.validation.ValidationOutcome.Checked;
 import com.telemetry.gateway.validation.ValidationOutcome.EnvelopeInvalid;
 import com.telemetry.gateway.validation.ValidationOutcome.Rejection;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -75,7 +74,9 @@ class BatchValidatorTest {
         ((ObjectNode) batch.get("events").get(2)).put("eventId", firstId.toUpperCase()); // same UUID, other case
 
         Checked result = checked(batch);
-        assertThat(result.accepted()).extracting(ValidationOutcome.AcceptedEvent::index).containsExactly(0, 1);
+        assertThat(result.accepted())
+                .extracting(ValidationOutcome.AcceptedEvent::index)
+                .containsExactly(0, 1);
         assertThat(result.rejections()).singleElement().satisfies(r -> {
             assertThat(r.index()).isEqualTo(2);
             assertThat(r.code()).isEqualTo(RejectionCode.DUPLICATE_EVENT_ID);
@@ -87,11 +88,16 @@ class BatchValidatorTest {
         ObjectNode batch = batchOf(2);
         ObjectNode first = (ObjectNode) batch.get("events").get(0);
         first.put("timestamp", ContractFiles.iso(NOW.minus(Duration.ofHours(30))));
-        ((ObjectNode) batch.get("events").get(1)).put("eventId", first.get("eventId").asText());
+        ((ObjectNode) batch.get("events").get(1))
+                .put("eventId", first.get("eventId").asText());
 
         Checked result = checked(batch);
-        assertThat(result.rejections()).extracting(Rejection::code).containsExactly(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
-        assertThat(result.accepted()).extracting(ValidationOutcome.AcceptedEvent::index).containsExactly(1);
+        assertThat(result.rejections())
+                .extracting(Rejection::code)
+                .containsExactly(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
+        assertThat(result.accepted())
+                .extracting(ValidationOutcome.AcceptedEvent::index)
+                .containsExactly(1);
     }
 
     @Test
@@ -115,10 +121,14 @@ class BatchValidatorTest {
         ((ObjectNode) events.get(3).get("metrics")).put("memoryUsedBytes", 9_000_000_000L);
 
         Checked result = checked(batch);
-        assertThat(result.accepted()).extracting(ValidationOutcome.AcceptedEvent::index).containsExactly(0, 2);
-        assertThat(result.rejections()).extracting(Rejection::index, Rejection::code).containsExactly(
-                org.assertj.core.groups.Tuple.tuple(1, RejectionCode.SCHEMA_VIOLATION),
-                org.assertj.core.groups.Tuple.tuple(3, RejectionCode.SEMANTIC_VIOLATION));
+        assertThat(result.accepted())
+                .extracting(ValidationOutcome.AcceptedEvent::index)
+                .containsExactly(0, 2);
+        assertThat(result.rejections())
+                .extracting(Rejection::index, Rejection::code)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(1, RejectionCode.SCHEMA_VIOLATION),
+                        org.assertj.core.groups.Tuple.tuple(3, RejectionCode.SEMANTIC_VIOLATION));
         assertThat(result.rejections().get(0).message()).contains("/events/1/metrics/cpuUsagePercent");
     }
 
@@ -126,8 +136,10 @@ class BatchValidatorTest {
     void timestampWindowEdgesAreInclusive() {
         assertThat(codeForTimestamp(NOW.minus(Duration.ofHours(24)))).isNull();
         assertThat(codeForTimestamp(NOW.plus(Duration.ofMinutes(5)))).isNull();
-        assertThat(codeForTimestamp(NOW.minus(Duration.ofHours(24)).minusMillis(1))).isEqualTo(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
-        assertThat(codeForTimestamp(NOW.plus(Duration.ofMinutes(5)).plusMillis(1))).isEqualTo(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
+        assertThat(codeForTimestamp(NOW.minus(Duration.ofHours(24)).minusMillis(1)))
+                .isEqualTo(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
+        assertThat(codeForTimestamp(NOW.plus(Duration.ofMinutes(5)).plusMillis(1)))
+                .isEqualTo(RejectionCode.TIMESTAMP_OUT_OF_RANGE);
     }
 
     @Test
@@ -142,11 +154,15 @@ class BatchValidatorTest {
     void formatsAreChecked() {
         ObjectNode badUuid = batchOf(1);
         ((ObjectNode) badUuid.get("events").get(0)).put("eventId", "not-a-uuid");
-        assertThat(checked(badUuid).rejections()).extracting(Rejection::code).containsExactly(RejectionCode.SCHEMA_VIOLATION);
+        assertThat(checked(badUuid).rejections())
+                .extracting(Rejection::code)
+                .containsExactly(RejectionCode.SCHEMA_VIOLATION);
 
         ObjectNode badDate = batchOf(1);
         ((ObjectNode) badDate.get("events").get(0)).put("timestamp", "yesterday");
-        assertThat(checked(badDate).rejections()).extracting(Rejection::code).containsExactly(RejectionCode.SCHEMA_VIOLATION);
+        assertThat(checked(badDate).rejections())
+                .extracting(Rejection::code)
+                .containsExactly(RejectionCode.SCHEMA_VIOLATION);
 
         ObjectNode badBatchId = batchOf(1);
         badBatchId.put("batchId", "123");
@@ -156,10 +172,13 @@ class BatchValidatorTest {
     @Test
     void eventThatIsNotAnObjectIsRejectedAlone() {
         ObjectNode batch = batchOf(2);
-        ((ArrayNode) batch.get("events")).set(0, ContractFiles.MAPPER.getNodeFactory().numberNode(42));
+        ((ArrayNode) batch.get("events"))
+                .set(0, ContractFiles.MAPPER.getNodeFactory().numberNode(42));
 
         Checked result = checked(batch);
-        assertThat(result.accepted()).extracting(ValidationOutcome.AcceptedEvent::index).containsExactly(1);
+        assertThat(result.accepted())
+                .extracting(ValidationOutcome.AcceptedEvent::index)
+                .containsExactly(1);
         assertThat(result.rejections()).singleElement().satisfies(r -> {
             assertThat(r.code()).isEqualTo(RejectionCode.SCHEMA_VIOLATION);
             assertThat(r.eventId()).isNull();
@@ -195,5 +214,4 @@ class BatchValidatorTest {
         }
         return batch;
     }
-
 }

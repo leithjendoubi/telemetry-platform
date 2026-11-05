@@ -1,5 +1,11 @@
 package com.telemetry.gateway;
 
+import com.fasterxml.jackson.core.JsonPointer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
@@ -11,13 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.fasterxml.jackson.core.JsonPointer;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
 
 /**
  * Test access to libs/telemetry-contracts/examples (copied onto the test classpath by pom.xml).
@@ -48,8 +47,7 @@ public final class ContractFiles {
         }
     }
 
-    private ContractFiles() {
-    }
+    private ContractFiles() {}
 
     public static JsonNode read(String resource) {
         try (InputStream in = ContractFiles.class.getClassLoader().getResourceAsStream(resource)) {
@@ -73,8 +71,12 @@ public final class ContractFiles {
     public static List<InvalidCase> invalidCases() {
         List<InvalidCase> cases = new ArrayList<>();
         for (JsonNode c : read("contracts/examples/invalid-cases.json").get("cases")) {
-            cases.add(new InvalidCase(c.get("name").asText(), c.get("set"), c.get("remove"),
-                    c.get("expect").asText(), c.get("code").asText()));
+            cases.add(new InvalidCase(
+                    c.get("name").asText(),
+                    c.get("set"),
+                    c.get("remove"),
+                    c.get("expect").asText(),
+                    c.get("code").asText()));
         }
         return cases;
     }

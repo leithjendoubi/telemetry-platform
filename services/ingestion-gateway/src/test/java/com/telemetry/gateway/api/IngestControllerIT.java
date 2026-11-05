@@ -2,6 +2,15 @@ package com.telemetry.gateway.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.networknt.schema.JsonSchema;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SchemaValidatorsConfig;
+import com.networknt.schema.SpecVersion;
+import com.telemetry.gateway.ContractFiles;
+import com.telemetry.gateway.ContractFiles.InvalidCase;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -13,16 +22,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.stream.Stream;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SchemaValidatorsConfig;
-import com.networknt.schema.SpecVersion;
-import com.telemetry.gateway.ContractFiles;
-import com.telemetry.gateway.ContractFiles.InvalidCase;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.OffsetSpec;
@@ -57,7 +56,7 @@ import org.testcontainers.kafka.KafkaContainer;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient(timeout = "30s")
 @Testcontainers
-class IngestControllerTest {
+class IngestControllerIT {
 
     static final String URL = "/api/v1/telemetry/ingest";
     static final String TOPIC = "telemetry.raw.v1";
@@ -77,7 +76,9 @@ class IngestControllerTest {
     @BeforeAll
     static void createTopicAndConsumer() throws Exception {
         try (AdminClient admin = AdminClient.create(Map.of("bootstrap.servers", KAFKA.getBootstrapServers()))) {
-            admin.createTopics(List.of(new NewTopic(TOPIC, 12, (short) 1))).all().get();
+            admin.createTopics(List.of(new NewTopic(TOPIC, 12, (short) 1)))
+                    .all()
+                    .get();
         }
         Properties p = new Properties();
         p.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
@@ -88,10 +89,15 @@ class IngestControllerTest {
         consumer = new KafkaConsumer<>(p);
         consumer.subscribe(List.of(TOPIC));
 
-        try (InputStream in = IngestControllerTest.class.getClassLoader()
+        try (InputStream in = IngestControllerIT.class
+                .getClassLoader()
                 .getResourceAsStream("contracts/schemas/telemetry-raw-event.1.0.json")) {
             rawEventSchema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
-                    .getSchema(in, SchemaValidatorsConfig.builder().formatAssertionsEnabled(true).build());
+                    .getSchema(
+                            in,
+                            SchemaValidatorsConfig.builder()
+                                    .formatAssertionsEnabled(true)
+                                    .build());
         }
     }
 
@@ -115,9 +121,13 @@ class IngestControllerTest {
         JsonNode body = post(batch, KEY)
                 .header("X-Request-Id", "req-42")
                 .exchange()
-                .expectStatus().isAccepted()
-                .expectHeader().valueEquals("X-Request-Id", "req-42")
-                .expectBody(JsonNode.class).returnResult().getResponseBody();
+                .expectStatus()
+                .isAccepted()
+                .expectHeader()
+                .valueEquals("X-Request-Id", "req-42")
+                .expectBody(JsonNode.class)
+                .returnResult()
+                .getResponseBody();
         assertThat(body.get("batchId").asText()).isEqualTo(batchId);
         assertThat(body.get("accepted").asInt()).isEqualTo(1);
         assertThat(body.get("rejected").asInt()).isZero();
@@ -125,10 +135,13 @@ class IngestControllerTest {
 
         List<ConsumerRecord<String, byte[]>> records = recordsOfBatch(batchId, 1);
         ConsumerRecord<String, byte[]> record = records.get(0);
-        assertThat(record.key()).isEqualTo(sentEvent.get("resource").get("instanceId").asText());
+        assertThat(record.key())
+                .isEqualTo(sentEvent.get("resource").get("instanceId").asText());
 
         JsonNode value = ContractFiles.MAPPER.readTree(record.value());
-        assertThat(rawEventSchema.validate(value)).as("record matches telemetry-raw-event.1.0.json").isEmpty();
+        assertThat(rawEventSchema.validate(value))
+                .as("record matches telemetry-raw-event.1.0.json")
+                .isEmpty();
         assertThat(value.get("agentId").asText()).isEqualTo("agent-checkout-api");
         assertThat(value.get("batchId").asText()).isEqualTo(batchId);
         Instant receivedAt = Instant.parse(value.get("receivedAt").asText());
@@ -150,22 +163,29 @@ class IngestControllerTest {
         ((ObjectNode) batch.get("events").get(1).get("metrics")).put("cpuUsagePercent", 101);
         String batchId = batch.get("batchId").asText();
 
-        JsonNode body = post(batch, KEY).exchange()
-                .expectStatus().isAccepted()
-                .expectBody(JsonNode.class).returnResult().getResponseBody();
+        JsonNode body = post(batch, KEY)
+                .exchange()
+                .expectStatus()
+                .isAccepted()
+                .expectBody(JsonNode.class)
+                .returnResult()
+                .getResponseBody();
         assertThat(body.get("accepted").asInt()).isEqualTo(2);
         assertThat(body.get("rejected").asInt()).isEqualTo(1);
         JsonNode rejection = body.get("rejections").get(0);
         assertThat(rejection.get("index").asInt()).isEqualTo(1);
         assertThat(rejection.get("code").asText()).isEqualTo("SCHEMA_VIOLATION");
-        assertThat(rejection.get("eventId").asText()).isEqualTo(batch.get("events").get(1).get("eventId").asText());
+        assertThat(rejection.get("eventId").asText())
+                .isEqualTo(batch.get("events").get(1).get("eventId").asText());
         assertThat(rejection.get("message").asText()).contains("cpuUsagePercent");
 
         List<String> publishedIds = recordsOfBatch(batchId, 2).stream()
-                .map(r -> readTree(r.value()).get("eventId").asText()).toList();
-        assertThat(publishedIds).containsExactlyInAnyOrder(
-                batch.get("events").get(0).get("eventId").asText(),
-                batch.get("events").get(2).get("eventId").asText());
+                .map(r -> readTree(r.value()).get("eventId").asText())
+                .toList();
+        assertThat(publishedIds)
+                .containsExactlyInAnyOrder(
+                        batch.get("events").get(0).get("eventId").asText(),
+                        batch.get("events").get(2).get("eventId").asText());
     }
 
     @Test
@@ -175,8 +195,11 @@ class IngestControllerTest {
             ((ObjectNode) event.get("resource")).put("instanceId", "checkout-api-03");
         }
         post(batch, KEY).exchange().expectStatus().isAccepted();
-        List<ConsumerRecord<String, byte[]>> records = recordsOfBatch(batch.get("batchId").asText(), 3);
-        assertThat(records).extracting(ConsumerRecord::partition).containsOnly(records.get(0).partition());
+        List<ConsumerRecord<String, byte[]>> records =
+                recordsOfBatch(batch.get("batchId").asText(), 3);
+        assertThat(records)
+                .extracting(ConsumerRecord::partition)
+                .containsOnly(records.get(0).partition());
     }
 
     // ------------------------------------------------------------------ the contract's invalid cases, over HTTP
@@ -193,14 +216,23 @@ class IngestControllerTest {
         boolean envelope = invalidCase.expect().equals("SCHEMA") && !invalidCase.touchesOnlyEvents();
 
         if (envelope) {
-            post(doc, KEY).exchange()
-                    .expectStatus().isBadRequest()
-                    .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                    .expectBody().jsonPath("$.errors").isNotEmpty();
+            post(doc, KEY)
+                    .exchange()
+                    .expectStatus()
+                    .isBadRequest()
+                    .expectHeader()
+                    .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.errors")
+                    .isNotEmpty();
         } else {
-            JsonNode body = post(doc, KEY).exchange()
-                    .expectStatus().isAccepted()
-                    .expectBody(JsonNode.class).returnResult().getResponseBody();
+            JsonNode body = post(doc, KEY)
+                    .exchange()
+                    .expectStatus()
+                    .isAccepted()
+                    .expectBody(JsonNode.class)
+                    .returnResult()
+                    .getResponseBody();
             assertThat(body.get("accepted").asInt()).isZero();
             assertThat(body.get("rejected").asInt()).isEqualTo(1);
             assertThat(body.get("rejections").get(0).get("code").asText()).isEqualTo(invalidCase.code());
@@ -214,22 +246,37 @@ class IngestControllerTest {
         for (JsonNode event : bad.get("events")) {
             ((ObjectNode) event.get("metrics")).put("memoryUsedBytes", 9_999_999_999L);
         }
-        post(bad, KEY).exchange().expectStatus().isAccepted()
-                .expectBody().jsonPath("$.accepted").isEqualTo(0).jsonPath("$.rejected").isEqualTo(2);
+        post(bad, KEY)
+                .exchange()
+                .expectStatus()
+                .isAccepted()
+                .expectBody()
+                .jsonPath("$.accepted")
+                .isEqualTo(0)
+                .jsonPath("$.rejected")
+                .isEqualTo(2);
         // 202 is only sent after Kafka acknowledged, so anything published would already be counted here
         assertThat(recordsInTopic()).isEqualTo(before);
 
         post(freshBatch(1), KEY).exchange().expectStatus().isAccepted();
-        assertThat(recordsInTopic()).as("the counter does see a published event").isEqualTo(before + 1);
+        assertThat(recordsInTopic())
+                .as("the counter does see a published event")
+                .isEqualTo(before + 1);
     }
 
     // ------------------------------------------------------------------ whole-request failures
 
     @Test
     void missingOrWrongApiKeyIs401() {
-        client.post().uri(URL).contentType(MediaType.APPLICATION_JSON).bodyValue(freshBatch(1).toString())
-                .exchange().expectStatus().isUnauthorized()
-                .expectHeader().contentType(MediaType.APPLICATION_PROBLEM_JSON);
+        client.post()
+                .uri(URL)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(freshBatch(1).toString())
+                .exchange()
+                .expectStatus()
+                .isUnauthorized()
+                .expectHeader()
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON);
         post(freshBatch(1), "dev-agent-nope").exchange().expectStatus().isUnauthorized();
     }
 
@@ -240,19 +287,31 @@ class IngestControllerTest {
 
     @Test
     void wrongContentTypeOrEncodingIs415() {
-        client.post().uri(URL).header("X-API-Key", KEY).contentType(MediaType.TEXT_PLAIN)
+        client.post()
+                .uri(URL)
+                .header("X-API-Key", KEY)
+                .contentType(MediaType.TEXT_PLAIN)
                 .bodyValue(freshBatch(1).toString())
-                .exchange().expectStatus().isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
-        post(freshBatch(1), KEY).header("Content-Encoding", "gzip")
-                .exchange().expectStatus().isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+                .exchange()
+                .expectStatus()
+                .isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+        post(freshBatch(1), KEY)
+                .header("Content-Encoding", "gzip")
+                .exchange()
+                .expectStatus()
+                .isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
     }
 
     @Test
     void jsonContentTypeWithCharsetIsAccepted() {
-        client.post().uri(URL).header("X-API-Key", KEY)
+        client.post()
+                .uri(URL)
+                .header("X-API-Key", KEY)
                 .contentType(MediaType.parseMediaType("application/json; charset=utf-8"))
                 .bodyValue(freshBatch(1).toString())
-                .exchange().expectStatus().isAccepted();
+                .exchange()
+                .expectStatus()
+                .isAccepted();
     }
 
     @Test
@@ -265,29 +324,54 @@ class IngestControllerTest {
     @Test
     void moreThan100EventsIs413And100IsFine() {
         post(freshBatch(101), KEY).exchange().expectStatus().isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
-        post(freshBatch(100), KEY).exchange().expectStatus().isAccepted()
-                .expectBody().jsonPath("$.accepted").isEqualTo(100);
+        post(freshBatch(100), KEY)
+                .exchange()
+                .expectStatus()
+                .isAccepted()
+                .expectBody()
+                .jsonPath("$.accepted")
+                .isEqualTo(100);
     }
 
     @Test
     void malformedJsonIs400() {
         for (String body : List.of("{\"schemaVersion\": ", "", "{\"x\": NaN}", "[1,2]")) {
-            client.post().uri(URL).header("X-API-Key", KEY).contentType(MediaType.APPLICATION_JSON)
+            client.post()
+                    .uri(URL)
+                    .header("X-API-Key", KEY)
+                    .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(body.getBytes(StandardCharsets.UTF_8))
-                    .exchange().expectStatus().isBadRequest();
+                    .exchange()
+                    .expectStatus()
+                    .isBadRequest();
         }
     }
 
     @Test
     void healthProbesAnswer() {
-        client.get().uri("/health/live").exchange().expectStatus().isOk().expectBody().jsonPath("$.status").isEqualTo("UP");
-        client.get().uri("/health/ready").exchange().expectStatus().isOk().expectBody().jsonPath("$.status").isEqualTo("UP");
+        client.get()
+                .uri("/health/live")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody()
+                .jsonPath("$.status")
+                .isEqualTo("UP");
+        client.get()
+                .uri("/health/ready")
+                .exchange()
+                .expectStatus()
+                .isOk()
+                .expectBody()
+                .jsonPath("$.status")
+                .isEqualTo("UP");
     }
 
     // ------------------------------------------------------------------ helpers
 
     WebTestClient.RequestHeadersSpec<?> post(JsonNode batch, String apiKey) {
-        return client.post().uri(URL)
+        return client.post()
+                .uri(URL)
                 .header("X-API-Key", apiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(batch.toString());
@@ -312,7 +396,8 @@ class IngestControllerTest {
     /** Exactly the records of one batch; fails if fewer than {@code expected} arrive within 15 s. */
     static List<ConsumerRecord<String, byte[]>> recordsOfBatch(String batchId, int expected) {
         List<ConsumerRecord<String, byte[]>> mine = pollUntil(batchId, expected).stream()
-                .filter(r -> readTree(r.value()).get("batchId").asText().equals(batchId)).toList();
+                .filter(r -> readTree(r.value()).get("batchId").asText().equals(batchId))
+                .toList();
         assertThat(mine).hasSize(expected);
         return mine;
     }
@@ -340,7 +425,9 @@ class IngestControllerTest {
             for (int p = 0; p < 12; p++) {
                 request.put(new TopicPartition(TOPIC, p), OffsetSpec.latest());
             }
-            return admin.listOffsets(request).all().get().values().stream().mapToLong(o -> o.offset()).sum();
+            return admin.listOffsets(request).all().get().values().stream()
+                    .mapToLong(o -> o.offset())
+                    .sum();
         }
     }
 
@@ -355,5 +442,4 @@ class IngestControllerTest {
     static String header(ConsumerRecord<String, byte[]> record, String name) {
         return new String(record.headers().lastHeader(name).value(), StandardCharsets.UTF_8);
     }
-
 }

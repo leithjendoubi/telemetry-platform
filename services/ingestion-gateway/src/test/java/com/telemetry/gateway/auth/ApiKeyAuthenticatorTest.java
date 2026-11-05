@@ -4,15 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
-
-import com.telemetry.gateway.config.GatewayProperties.AgentEntry;
 import org.junit.jupiter.api.Test;
 
 class ApiKeyAuthenticatorTest {
 
     private final ApiKeyAuthenticator authenticator = new ApiKeyAuthenticator(List.of(
-            new AgentEntry("agent-checkout-api", ApiKeyAuthenticator.sha256Hex("dev-agent-checkout-api"), List.of("checkout-api")),
-            new AgentEntry("agent-cart-api", ApiKeyAuthenticator.sha256Hex("dev-agent-cart-api").toUpperCase(), List.of("cart-api"))));
+            new AgentCredential(
+                    "agent-checkout-api",
+                    ApiKeyAuthenticator.sha256Hex("dev-agent-checkout-api"),
+                    List.of("checkout-api")),
+            new AgentCredential(
+                    "agent-cart-api",
+                    ApiKeyAuthenticator.sha256Hex("dev-agent-cart-api").toUpperCase(),
+                    List.of("cart-api"))));
 
     @Test
     void knownKeyGivesItsAgent() {
@@ -20,7 +24,10 @@ class ApiKeyAuthenticatorTest {
             assertThat(agent.agentId()).isEqualTo("agent-checkout-api");
             assertThat(agent.allowedServices()).containsExactly("checkout-api");
         });
-        assertThat(authenticator.authenticate("dev-agent-cart-api")).get().extracting(Agent::agentId).isEqualTo("agent-cart-api");
+        assertThat(authenticator.authenticate("dev-agent-cart-api"))
+                .get()
+                .extracting(Agent::agentId)
+                .isEqualTo("agent-cart-api");
     }
 
     @Test
@@ -29,7 +36,8 @@ class ApiKeyAuthenticatorTest {
         assertThat(authenticator.authenticate("")).isEmpty();
         assertThat(authenticator.authenticate("dev-agent-checkout-ap")).isEmpty();
         // the hash itself is not a key
-        assertThat(authenticator.authenticate(ApiKeyAuthenticator.sha256Hex("dev-agent-checkout-api"))).isEmpty();
+        assertThat(authenticator.authenticate(ApiKeyAuthenticator.sha256Hex("dev-agent-checkout-api")))
+                .isEmpty();
     }
 
     @Test
@@ -41,11 +49,12 @@ class ApiKeyAuthenticatorTest {
 
     @Test
     void badConfigurationFailsAtStartup() {
-        assertThatThrownBy(() -> new ApiKeyAuthenticator(List.of(new AgentEntry("a", "dev-key-in-clear", List.of("s")))))
+        assertThatThrownBy(() ->
+                        new ApiKeyAuthenticator(List.of(new AgentCredential("a", "dev-key-in-clear", List.of("s")))))
                 .hasMessageContaining("64 hex");
         String hash = ApiKeyAuthenticator.sha256Hex("k");
         assertThatThrownBy(() -> new ApiKeyAuthenticator(List.of(
-                new AgentEntry("a", hash, List.of("s")), new AgentEntry("b", hash, List.of("s")))))
+                        new AgentCredential("a", hash, List.of("s")), new AgentCredential("b", hash, List.of("s")))))
                 .hasMessageContaining("share one API key");
     }
 }
