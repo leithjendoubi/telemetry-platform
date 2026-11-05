@@ -220,6 +220,9 @@ Progress:
   one-time blocking reads on Netty threads (date library, validator messages, lazy Kafka producer), fixed by start-up
   warm-up / eager producer creation (ADR-0011). Guards: `BlockHoundIsActiveTest`, `KafkaSenderStartupTest` (JMX).
   Root `mvn verify`: gateway 66 unit + 44 IT, analytics 11 + 7, 0 blocking calls.
+- A7 done 2026-11-05: gzip bodies (limit checked after unpacking, zip bomb 413, broken gzip 400, other encodings 415);
+  graceful shutdown proven by `GracefulShutdownIT` (6 s slow client, because Reactor Netty's "immediate" also waits a
+  few seconds). ADR-0012. Gateway 70 unit + 48 IT green, 0 blocking calls. **Part A of week 5 complete.**
 - Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)

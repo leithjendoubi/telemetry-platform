@@ -47,7 +47,8 @@ import reactor.core.publisher.Mono;
  *  X-API-Key of a revoked agent ............ 403
  *  agent registry does not answer .......... 503 with Retry-After
  *  agent over its own rate limit ........... 429 with Retry-After (token bucket from table agent, FR-ING-06)
- *  Content-Type not application/json ....... 415   (also Content-Encoding, until gzip arrives in week 5)
+ *  Content-Type not application/json ....... 415   (also a Content-Encoding other than gzip / identity)
+ *  gzip body not valid gzip ................ 400   (FR-ING-08; the size limit below applies after unpacking)
  *  body larger than 256 KiB ................ 413
  *  body is not JSON ........................ 400
  *  more than 100 events .................... 413
@@ -169,12 +170,13 @@ public class IngestController {
                     problem(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Content-Type must be application/json", requestId));
         }
         String encoding = headers.getFirst(HttpHeaders.CONTENT_ENCODING);
-        if (encoding != null && !encoding.equalsIgnoreCase("identity")) {
+        boolean gzip = encoding != null && encoding.trim().equalsIgnoreCase("gzip");
+        if (encoding != null && !gzip && !encoding.trim().equalsIgnoreCase("identity")) {
             return afterBody(
                     request,
                     problem(
                             HttpStatus.UNSUPPORTED_MEDIA_TYPE,
-                            "Content-Encoding " + encoding + " is not supported yet",
+                            "Content-Encoding must be gzip or identity, not " + encoding,
                             requestId));
         }
         if (headers.getContentLength() > props.maxBodyBytes()) {
@@ -191,7 +193,18 @@ public class IngestController {
                     return bytes;
                 })
                 .defaultIfEmpty(new byte[0])
-                .flatMap(body -> handleBody(body, agent, receivedAt, requestId))
+                .flatMap(body -> {
+                    if (!gzip) {
+                        return handleBody(body, agent, receivedAt, requestId);
+                    }
+                    try { // FR-ING-08; spec 8.1: the 256 KiB limit applies after decompression
+                        return handleBody(GzipBody.unpack(body, props.maxBodyBytes()), agent, receivedAt, requestId);
+                    } catch (GzipBody.TooLarge e) {
+                        return tooLarge(requestId);
+                    } catch (GzipBody.NotGzip e) {
+                        return problem(HttpStatus.BAD_REQUEST, e.getMessage(), requestId);
+                    }
+                })
                 .onErrorResume(DataBufferLimitException.class, e -> tooLarge(requestId));
     }
 

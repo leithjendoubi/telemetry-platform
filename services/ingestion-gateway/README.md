@@ -41,6 +41,10 @@ too large for a 64-bit number (e.g. `1e400`) are rejected, and accepted events r
 Non-blocking (FR-ING-02, ADR-0011): every test runs with BlockHound, which fails a test when an event-loop thread
 blocks. The validator and the Kafka producer do their one-time file reads at start-up.
 
+gzip and shutdown (ADR-0012): `Content-Encoding: gzip` bodies are accepted, with the 256 KiB limit checked after
+unpacking (a "zip bomb" gets 413, broken gzip 400). On shutdown the gateway refuses new connections and finishes the
+requests in progress within 30 s.
+
 **Not yet (week 5 plan in CLAUDE.md):**
 BlockHound (A6), gzip (A7), Prometheus `/metrics` and OpenTelemetry `traceparent` (B1, B2), Kafka check in readiness.
 
@@ -106,6 +110,8 @@ Settings can be changed with environment variables, e.g. `KAFKA_BOOTSTRAP_SERVER
 | `IngestControllerIT` (AT-04) | an agent over its quota gets 429 + `Retry-After`, publishes nothing, other agents carry on; it gets through again after 1 s |
 | `BlockHoundIsActiveTest` | BlockHound is really on (a planted `Thread.sleep` on a non-blocking thread is reported) |
 | `KafkaSenderStartupTest` | the Kafka producer exists right after start-up, before the first send (JMX registration) |
+| `GzipBodyTest`, `IngestControllerIT` (gzip) | gzip bodies unpacked; limit applied after unpacking (zip bomb 413); broken gzip 400; other encodings 415 |
+| `GracefulShutdownIT` | on shutdown, new connections are refused and a request in progress still gets 202 with its event in Kafka |
 | `InFlightLimitIT` | with the cap at 1, a held request blocks the next one (503 + `Retry-After`); the slot is free again afterwards |
 
 Testcontainers must be 1.21.4 or newer (1.21.3 cannot talk to Docker Engine 29); Spring Boot 3.5.16 manages 1.21.4.

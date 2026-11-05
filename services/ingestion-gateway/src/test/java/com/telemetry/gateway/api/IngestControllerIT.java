@@ -547,10 +547,55 @@ class IngestControllerIT {
                 .expectStatus()
                 .isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
         post(freshBatch(1), KEY)
-                .header("Content-Encoding", "gzip")
+                .header("Content-Encoding", "br") // only gzip and identity are supported (FR-ING-08)
                 .exchange()
                 .expectStatus()
                 .isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    /** FR-ING-08: a gzip body is accepted and its events reach Kafka exactly as if they had been sent plain. */
+    @Test
+    void gzipBodyIsAccepted() throws Exception {
+        ObjectNode batch = freshBatch(3);
+        JsonNode body = postGzip(GzipBodyTest.gzip(batch.toString().getBytes(StandardCharsets.UTF_8)))
+                .expectStatus()
+                .isAccepted()
+                .expectBody(JsonNode.class)
+                .returnResult()
+                .getResponseBody();
+        assertThat(body.get("accepted").asInt()).isEqualTo(3);
+        JsonNode first =
+                readTree(recordsOfBatch(batch.get("batchId").asText(), 3).get(0).value());
+        assertThat(rawEventSchema.validate(first)).isEmpty();
+    }
+
+    /** Spec 8.1: the 256 KiB limit applies after decompression; a small "zip bomb" gets 413, nothing more. */
+    @Test
+    void gzipBodyLargerThan256KiBWhenUnpackedIs413() throws Exception {
+        ObjectNode batch = freshBatch(1);
+        batch.put("padding", "x".repeat(300_000)); // compresses to a few hundred bytes
+        byte[] compressed = GzipBodyTest.gzip(batch.toString().getBytes(StandardCharsets.UTF_8));
+        assertThat(compressed.length).isLessThan(10_000);
+        postGzip(compressed).expectStatus().isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+    }
+
+    @Test
+    void bodyThatIsNotGzipDespiteTheHeaderIs400() {
+        postGzip(freshBatch(1).toString().getBytes(StandardCharsets.UTF_8))
+                .expectStatus()
+                .isBadRequest()
+                .expectHeader()
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON);
+    }
+
+    WebTestClient.ResponseSpec postGzip(byte[] body) {
+        return client.post()
+                .uri(URL)
+                .header("X-API-Key", KEY)
+                .header("Content-Encoding", "gzip")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchange();
     }
 
     @Test
