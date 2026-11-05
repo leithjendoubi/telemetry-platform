@@ -84,6 +84,12 @@ class InFlightLimitIT {
                     .readLine();
             assertThat(statusLine).startsWith("HTTP/1.1 ");
         }
+        // the slot is freed just after the answer is sent, so the client may read it a moment earlier
+        long freeBy = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (limiter.inFlight() > 0 && System.nanoTime() < freeBy) {
+            Thread.sleep(20);
+        }
+        assertThat(limiter.inFlight()).as("the held request gave its slot back").isZero();
         assertThat(secondRequestDetail()).as("the slot is free again").isNotEqualTo(BUSY);
     }
 

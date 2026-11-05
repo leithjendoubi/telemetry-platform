@@ -38,6 +38,9 @@ Rate limits are per gateway instance (ADR-0009). Change an agent's limit (takes 
 Sanitisation (FR-ING-04, ADR-0010): identifier patterns read `$` as the true end of text (no trailing newline), metrics
 too large for a 64-bit number (e.g. `1e400`) are rejected, and accepted events reach Kafka with their timestamp in UTC.
 
+Non-blocking (FR-ING-02, ADR-0011): every test runs with BlockHound, which fails a test when an event-loop thread
+blocks. The validator and the Kafka producer do their one-time file reads at start-up.
+
 **Not yet (week 5 plan in CLAUDE.md):**
 BlockHound (A6), gzip (A7), Prometheus `/metrics` and OpenTelemetry `traceparent` (B1, B2), Kafka check in readiness.
 
@@ -101,6 +104,8 @@ Settings can be changed with environment variables, e.g. `KAFKA_BOOTSTRAP_SERVER
 | `RegistryUnavailableIT` | database down gives 503 + `Retry-After`, never 401 |
 | `AgentRateLimiterTest`, `InFlightLimiterTest` | token buckets (burst, refill, Retry-After rounded up, agents independent, changed limits) and the in-flight cap under 64 threads |
 | `IngestControllerIT` (AT-04) | an agent over its quota gets 429 + `Retry-After`, publishes nothing, other agents carry on; it gets through again after 1 s |
+| `BlockHoundIsActiveTest` | BlockHound is really on (a planted `Thread.sleep` on a non-blocking thread is reported) |
+| `KafkaSenderStartupTest` | the Kafka producer exists right after start-up, before the first send (JMX registration) |
 | `InFlightLimitIT` | with the cap at 1, a held request blocks the next one (503 + `Retry-After`); the slot is free again afterwards |
 
 Testcontainers must be 1.21.4 or newer (1.21.3 cannot talk to Docker Engine 29); Spring Boot 3.5.16 manages 1.21.4.

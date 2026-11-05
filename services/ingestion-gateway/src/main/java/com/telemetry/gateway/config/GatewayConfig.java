@@ -83,7 +83,12 @@ public class GatewayConfig {
         config.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, 5_000);
         config.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, 10_000);
         config.putAll(props.kafka().producer());
-        return KafkaSender.create(SenderOptions.<String, byte[]>create(config));
+        KafkaSender<String, byte[]> sender = KafkaSender.create(SenderOptions.<String, byte[]>create(config));
+        // FR-ING-02: reactor-kafka creates the producer lazily, on the first send, i.e. on a Netty event-loop
+        // thread; creating it reads files and starts threads (found by BlockHound on 2026-11-05). Create it here, at
+        // start-up. This does not contact the broker, so the gateway still starts while Kafka is down.
+        sender.doOnProducer(producer -> producer.metrics().size()).block(Duration.ofSeconds(30));
+        return sender;
     }
 
     @Bean

@@ -21,6 +21,8 @@
         <contracts.dir>${repo.root}/libs/telemetry-contracts</contracts.dir>
         <!-- the real database init script, reused by the integration tests -->
         <init-db.dir>${repo.root}/infra/compose/init-db</init-db.dir>
+        <!-- empty default, so @{argLine} below also resolves when JaCoCo is skipped (JaCoCo sets it otherwise) -->
+        <argLine></argLine>
     </properties>
 
     <dependencies>
@@ -115,6 +117,12 @@
             <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- FR-ING-02: installed automatically for every test; a blocking call on a non-blocking thread fails it -->
+        <dependency>
+            <groupId>io.projectreactor.tools</groupId>
+            <artifactId>blockhound-junit-platform</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -154,9 +162,20 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
             </plugin>
+            <!-- BlockHound on Java 21 needs this JVM flag; @{argLine} keeps the JaCoCo agent -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>@{argLine} -XX:+AllowRedefinitionToAddDeleteMethods</argLine>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <argLine>@{argLine} -XX:+AllowRedefinitionToAddDeleteMethods</argLine>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>

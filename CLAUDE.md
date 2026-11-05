@@ -216,6 +216,10 @@ Progress:
   (Java and Python `$`; fixed by reading `$` as end of text in both), `1e400` became `"Infinity"` in Kafka (new
   SEMANTIC_VIOLATION rule), offset timestamps passed unchanged (now UTC in the raw record). 6 new contract cases,
   marker `NUMBER:<literal>`; 64 unit + 44 IT green; planted bugs caught.
+- A6 done 2026-11-05: BlockHound 1.0.18 in all gateway tests (JVM flag next to JaCoCo's @{argLine}); it found three
+  one-time blocking reads on Netty threads (date library, validator messages, lazy Kafka producer), fixed by start-up
+  warm-up / eager producer creation (ADR-0011). Guards: `BlockHoundIsActiveTest`, `KafkaSenderStartupTest` (JMX).
+  Root `mvn verify`: gateway 66 unit + 44 IT, analytics 11 + 7, 0 blocking calls.
 - Repository visibility: still public; Leith was asked whether to make it private (his decision, not answered yet).
 
 ## Stage 2 plan: walking skeleton (spec 16.2, week 4)

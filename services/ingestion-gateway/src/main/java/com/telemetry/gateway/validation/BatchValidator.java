@@ -1,6 +1,7 @@
 package com.telemetry.gateway.validation;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.JsonNodePath;
 import com.networknt.schema.JsonSchema;
@@ -65,6 +66,8 @@ public class BatchValidator {
                 .formatAssertionsEnabled(true) // in draft 2020-12 "format" is only a hint unless switched on
                 .pathType(PathType.JSON_POINTER) // error messages say /events/0/metrics/... like the contract tests
                 .regularExpressionFactory(EcmaRegularExpressionFactory.INSTANCE) // '$' = end of text (FR-ING-04)
+                // one fixed language: the same messages on every machine, and only one message file to load (warmUp)
+                .locale(Locale.ENGLISH)
                 .build();
         try (InputStream in = BatchValidator.class.getClassLoader().getResourceAsStream(SCHEMA_RESOURCE)) {
             if (in == null) {
@@ -76,7 +79,40 @@ public class BatchValidator {
             throw new IllegalStateException("cannot read " + SCHEMA_RESOURCE, e);
         }
         this.schema.initializeValidators(); // do the one-time work now, not during the first request
+        warmUp();
     }
+
+    /**
+     * FR-ING-02: two libraries read files from their jars the first time they are used (found by BlockHound on
+     * 2026-11-05): the date library behind "format: date-time" (its leap-second table) and the validator's error
+     * messages (a properties file, kept in memory afterwards). Validating one valid and one broken sample batch here,
+     * on the start-up thread, keeps that one-time I/O off the Netty event loop. The results do not matter.
+     */
+    private void warmUp() {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            validate(mapper.readTree(WARM_UP_BATCH), Set.of("warm-up"));
+            validate(
+                    mapper.readTree(WARM_UP_BATCH
+                            .replace("\"cpuUsagePercent\":1", "\"cpuUsagePercent\":101")
+                            .replace("warm-up-01", "warm up 01")
+                            .replace("\"region\":\"r\"", "\"region\":\"r\",\"extra\":1")),
+                    Set.of("warm-up"));
+        } catch (IOException e) {
+            throw new IllegalStateException("the warm-up batches are valid JSON", e);
+        }
+    }
+
+    private static final String WARM_UP_BATCH = """
+            {"schemaVersion":"1.0","batchId":"00000000-0000-4000-8000-000000000000",
+             "agent":{"agentId":"warm-up","agentVersion":"0","sentAt":"2026-01-01T00:00:00.000Z"},
+             "events":[{"eventId":"00000000-0000-4000-8000-000000000001","timestamp":"2026-01-01T00:00:00.000+01:00",
+               "intervalSeconds":15,
+               "resource":{"serviceName":"warm-up","instanceId":"warm-up-01","environment":"dev","region":"r"},
+               "metrics":{"cpuUsagePercent":1,"memoryUsedBytes":1,"memoryLimitBytes":2,"networkRxBytesPerSec":1,
+                 "networkTxBytesPerSec":1,"diskReadBytesPerSec":1,"diskWriteBytesPerSec":1,"activeThreadCount":1,
+                 "httpRequestsPerSec":1,"httpErrorRatePercent":0,"httpLatencyP95Ms":1,"gcPauseMsPerMin":1}}]}
+            """;
 
     public ValidationOutcome validate(JsonNode batch, Set<String> allowedServices) {
         // ---- layer 1: JSON Schema, errors sorted into "envelope" and "event i"
