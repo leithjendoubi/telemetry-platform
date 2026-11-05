@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -18,21 +19,21 @@ def _default_contracts_dir() -> Path:
 
 @dataclass(frozen=True)
 class Settings:
-    bootstrap_servers: str = "localhost:9092"   # kafka:19092 inside compose
-    group_id: str = "detection"                 # FR-DET-01
+    bootstrap_servers: str = "localhost:9092"  # kafka:19092 inside compose
+    group_id: str = "detection"  # FR-DET-01
     input_topic: str = "telemetry.raw.v1"
     output_topic: str = "telemetry.scored.v1"
-    dlq_topic: str = "telemetry.raw.v1.dlq"     # FR-DET-10 naming (open question in CLAUDE.md)
-    max_batch: int = 500                        # records handled per poll, then one flush + one commit
+    dlq_topic: str = "telemetry.raw.v1.dlq"  # FR-DET-10 naming (open question in CLAUDE.md)
+    max_batch: int = 500  # records handled per poll, then one flush + one commit
     poll_timeout_s: float = 0.5
     flush_timeout_s: float = 30.0
     stats_interval_s: float = 10.0
-    contracts_dir: Path = _default_contracts_dir()
-    heartbeat_file: Path | None = None          # touched on every loop pass; the Docker HEALTHCHECK reads its age
+    contracts_dir: Path = field(default_factory=_default_contracts_dir)
+    heartbeat_file: Path | None = None  # touched on every loop pass; the Docker HEALTHCHECK reads its age
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
-        env = os.environ if env is None else env
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Settings:
+        env: Mapping[str, str] = os.environ if environ is None else environ
         d = cls()
         return cls(
             bootstrap_servers=env.get("KAFKA_BOOTSTRAP_SERVERS", d.bootstrap_servers),
@@ -45,5 +46,7 @@ class Settings:
             flush_timeout_s=float(env.get("DETECTION_FLUSH_TIMEOUT_S", d.flush_timeout_s)),
             stats_interval_s=float(env.get("DETECTION_STATS_INTERVAL_S", d.stats_interval_s)),
             contracts_dir=Path(env.get("CONTRACTS_DIR", str(d.contracts_dir))),
-            heartbeat_file=Path(env["DETECTION_HEARTBEAT_FILE"]) if env.get("DETECTION_HEARTBEAT_FILE") else None,
+            heartbeat_file=Path(env["DETECTION_HEARTBEAT_FILE"])
+            if env.get("DETECTION_HEARTBEAT_FILE")
+            else None,
         )

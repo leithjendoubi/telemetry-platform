@@ -1,4 +1,7 @@
-"""Shared test fixtures. The contract files come from libs/telemetry-contracts, the same files the gateway and simulator test."""
+"""Shared test fixtures.
+
+The contract files come from libs/telemetry-contracts, the same files the gateway and the simulator test.
+"""
 
 from __future__ import annotations
 

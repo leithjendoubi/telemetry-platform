@@ -7,7 +7,7 @@ The stub gives every event the same "nothing unusual" prediction. The real model
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,7 @@ SCORED_SCHEMA = "schemas/telemetry-scored-event.1.0.json"
 
 STUB_MODEL_VERSION = "stub-0"
 STUB_FEATURE_SET_VERSION = "none"
-STUB_THRESHOLD = 0.5   # placeholder; a real threshold is chosen on the validation day (spec 9)
+STUB_THRESHOLD = 0.5  # placeholder; a real threshold is chosen on the validation day (spec 9)
 
 
 class PoisonRecord(Exception):
@@ -68,5 +68,5 @@ def score(raw: dict[str, Any], now: datetime) -> dict[str, Any]:
 
 def iso_ms(moment: datetime) -> str:
     """2026-10-14T13:24:14.458Z, the timestamp style used across the platform."""
-    moment = moment.astimezone(timezone.utc)
+    moment = moment.astimezone(UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
